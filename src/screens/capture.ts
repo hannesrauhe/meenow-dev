@@ -39,12 +39,12 @@ async function captureFrame(video: HTMLVideoElement, forcePortrait: boolean): Pr
   const H = video.videoHeight;
   const canvas = document.createElement('canvas');
   if (forcePortrait && W > H) {
-    // Rotate landscape stream 90° counter-clockwise to portrait
+    // Rotate landscape stream 90° clockwise to portrait (Android sensor orientation 90°)
     canvas.width = H;
     canvas.height = W;
     const ctx = canvas.getContext('2d')!;
-    ctx.translate(0, W);
-    ctx.rotate(-Math.PI / 2);
+    ctx.translate(H, 0);
+    ctx.rotate(Math.PI / 2);
     ctx.drawImage(video, 0, 0);
   } else {
     canvas.width = W;
