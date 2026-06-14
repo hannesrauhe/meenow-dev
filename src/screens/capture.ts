@@ -34,17 +34,28 @@ async function openCamera(
   return stream;
 }
 
-async function captureFrame(video: HTMLVideoElement, forcePortrait: boolean): Promise<Blob> {
+async function captureFrame(
+  video: HTMLVideoElement,
+  forcePortrait: boolean,
+  facingMode: 'environment' | 'user',
+): Promise<Blob> {
   const W = video.videoWidth;
   const H = video.videoHeight;
   const canvas = document.createElement('canvas');
   if (forcePortrait && W > H) {
-    // Rotate landscape stream 90° counter-clockwise to portrait
+    // Rotate landscape sensor frame to portrait.
+    // Back camera (environment): sensor is rotated 90° CW relative to portrait, so rotate CW to correct.
+    // Front camera (user): sensor orientation is 270° CW (= 90° CCW), so rotate CCW to correct.
     canvas.width = H;
     canvas.height = W;
     const ctx = canvas.getContext('2d')!;
-    ctx.translate(0, W);
-    ctx.rotate(-Math.PI / 2);
+    if (facingMode === 'environment') {
+      ctx.translate(H, 0);
+      ctx.rotate(Math.PI / 2);
+    } else {
+      ctx.translate(0, W);
+      ctx.rotate(-Math.PI / 2);
+    }
     ctx.drawImage(video, 0, 0);
   } else {
     canvas.width = W;
@@ -209,7 +220,7 @@ export function renderCapture(onDone?: () => void): HTMLElement {
   }
 
   async function captureBack(video: HTMLVideoElement): Promise<void> {
-    backBlob = await captureFrame(video, preferPortrait).catch(() => null);
+    backBlob = await captureFrame(video, preferPortrait, 'environment').catch(() => null);
     if (!backBlob) { show('error', 'Failed to capture.'); return; }
     stopAllStreams();
     show('switching');
@@ -252,7 +263,7 @@ export function renderCapture(onDone?: () => void): HTMLElement {
       await new Promise(r => setTimeout(r, 1000));
     }
     if (countdownEl) countdownEl.textContent = '';
-    frontBlob = await captureFrame(video, preferPortrait).catch(() => null);
+    frontBlob = await captureFrame(video, preferPortrait, 'user').catch(() => null);
     if (!frontBlob) { show('error', 'Failed to capture selfie.'); return; }
     stopAllStreams();
     compositeBlob = await stitchPhotos(backBlob!, frontBlob).catch(() => null);
