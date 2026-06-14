@@ -62,11 +62,11 @@ async function captureFrame(video: HTMLVideoElement): Promise<Blob> {
     canvas.width = H;
     canvas.height = W;
     if (angle === 0) {
-      ctx.translate(0, W);
-      ctx.rotate(-Math.PI / 2); // produces CW rotation for standard Android back camera
-    } else {
       ctx.translate(H, 0);
       ctx.rotate(Math.PI / 2);
+    } else {
+      ctx.translate(0, W);
+      ctx.rotate(-Math.PI / 2);
     }
   } else {
     canvas.width = W;
