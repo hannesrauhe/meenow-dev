@@ -1,8 +1,14 @@
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import { execSync } from 'child_process';
+
+const GIT_HASH = execSync('git rev-parse --short HEAD').toString().trim();
 
 export default defineConfig({
   base: '/',
+  define: {
+    __GIT_HASH__: JSON.stringify(GIT_HASH),
+  },
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
