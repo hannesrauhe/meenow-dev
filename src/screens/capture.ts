@@ -19,7 +19,7 @@ async function openCamera(
   facingMode: 'environment' | 'user',
 ): Promise<MediaStream> {
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: { ideal: facingMode }, width: { ideal: 1080 }, height: { ideal: 1920 } },
+    video: { facingMode: { ideal: facingMode }, width: { ideal: 1920 }, height: { ideal: 1080 } },
     audio: false,
   });
   activeStreams.push(stream);
@@ -197,6 +197,14 @@ export function renderCapture(onDone?: () => void): HTMLElement {
     });
     d.appendChild(orientBtn);
 
+    const dbg = document.createElement('p');
+    dbg.className = 'absolute bottom-36 left-1/2 -translate-x-1/2 text-white/50 text-xs font-mono bg-black/30 px-2 py-0.5 rounded';
+    dbg.textContent = 'waiting for camera…';
+    video.addEventListener('loadedmetadata', () => {
+      dbg.textContent = `stream: ${video.videoWidth}×${video.videoHeight}`;
+    });
+    d.appendChild(dbg);
+
     const btn = document.createElement('button');
     btn.className = 'absolute bottom-12 left-1/2 -translate-x-1/2 w-20 h-20 text-white drop-shadow-lg active:scale-95';
     btn.setAttribute('aria-label', 'Capture');
@@ -265,13 +273,19 @@ export function renderCapture(onDone?: () => void): HTMLElement {
     d.className = 'w-full h-full flex flex-col';
 
     const imgWrapper = document.createElement('div');
-    imgWrapper.className = 'flex-1 min-h-0 flex items-center justify-center overflow-hidden';
+    imgWrapper.className = 'relative flex-1 min-h-0 flex items-center justify-center overflow-hidden';
     previewUrl = URL.createObjectURL(compositeBlob!);
     const img = document.createElement('img');
     img.src = previewUrl;
     img.className = 'max-w-full max-h-full object-contain';
     img.alt = 'Your meenow photo';
+    const dimLabel = document.createElement('p');
+    dimLabel.className = 'absolute top-2 left-2 text-white/70 text-xs font-mono bg-black/50 px-2 py-0.5 rounded';
+    img.addEventListener('load', () => {
+      dimLabel.textContent = `composite: ${img.naturalWidth}×${img.naturalHeight}`;
+    });
     imgWrapper.appendChild(img);
+    imgWrapper.appendChild(dimLabel);
     d.appendChild(imgWrapper);
 
     const bar = document.createElement('div');
