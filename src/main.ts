@@ -1,3 +1,5 @@
+declare const __GIT_HASH__: string;
+
 import './style.css';
 import { getAuthState, handleOAuthCallback } from './api/auth';
 import { getTodayTrigger, computeState, type AppState } from './timer';
@@ -17,7 +19,7 @@ let tickId: number | null = null;
 const DEV_HOSTNAMES = new Set(['dev.meenow.de', 'localhost', '127.0.0.1']);
 if (DEV_HOSTNAMES.has(window.location.hostname)) {
   const badge = document.createElement('div');
-  badge.textContent = 'dev';
+  badge.textContent = `dev ${__GIT_HASH__}`;
   badge.className = 'fixed bottom-3 right-3 bg-gold text-white text-xs font-semibold px-2 py-0.5 rounded-full z-50 opacity-75 pointer-events-none select-none';
   document.body.appendChild(badge);
 }
