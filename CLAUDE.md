@@ -26,7 +26,7 @@ There are two separate GitHub repositories, each deploying to its own domain via
 
 | Repo | Domain | Deploy trigger |
 |------|--------|---------------|
-| `hannesrauhe/meenow` (this repo) | `dev.meenow.de` | every push to any branch, deploys immediately |
+| `hannesrauhe/meenow-dev` | `dev.meenow.de` | every push to any branch, deploys immediately |
 | `meenow-de/meenow` | `meenow.de` | every push to any branch, but requires manual approval |
 
 The workflow file `.github/workflows/deploy.yml` is **identical in both repos**. The difference in behaviour comes entirely from the `github-pages` environment protection rule configured in `meenow-de/meenow` (Settings → Environments → github-pages → Required reviewers). The `deploy` job pauses there until a reviewer approves; on the dev repo there is no such rule so it deploys immediately.
