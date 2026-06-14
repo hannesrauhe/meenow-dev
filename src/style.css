@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-cream text-ink font-sans;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@layer components {
+  .screen {
+    @apply min-h-dvh flex flex-col items-center justify-center px-6;
+  }
+
+  .btn-primary {
+    @apply bg-ink text-cream rounded-full px-8 py-3 text-base font-medium
+           active:scale-95 transition-transform select-none cursor-pointer;
+  }
+}
+
+@layer utilities {
+  .safe-area-bottom {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+}
