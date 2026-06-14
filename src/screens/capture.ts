@@ -35,8 +35,12 @@ async function openCamera(
 }
 
 async function captureFrame(video: HTMLVideoElement, forcePortrait: boolean): Promise<Blob> {
-  const W = video.videoWidth;
-  const H = video.videoHeight;
+  const stream = video.srcObject as MediaStream | null;
+  const track = stream?.getVideoTracks()[0];
+  const settings = track?.getSettings();
+
+  const W = settings?.width || video.videoWidth;
+  const H = settings?.height || video.videoHeight;
   const canvas = document.createElement('canvas');
   if (forcePortrait && W > H) {
     // Rotate landscape stream 90° counter-clockwise to portrait
