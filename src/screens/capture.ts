@@ -19,7 +19,7 @@ async function openCamera(
   facingMode: 'environment' | 'user',
 ): Promise<MediaStream> {
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: { ideal: facingMode }, width: { ideal: 1080 }, height: { ideal: 1920 } },
+    video: { facingMode: { ideal: facingMode } },
     audio: false,
   });
   activeStreams.push(stream);
@@ -32,6 +32,23 @@ async function openCamera(
     };
   });
   return stream;
+}
+
+// Rotate the video element for correct viewfinder framing when the stream is
+// landscape but the device is portrait. Applied purely to display — does not
+// affect the pixels captured by captureFrame.
+function applyViewfinderTransform(video: HTMLVideoElement): void {
+  if (video.videoWidth <= video.videoHeight) return; // stream is already portrait
+  const type = screen.orientation?.type ?? '';
+  if (!type.startsWith('portrait')) return; // device is landscape or unknown
+  const deg = screen.orientation.angle === 180 ? -90 : 90;
+  video.style.width = '100vh';
+  video.style.height = '100vw';
+  video.style.position = 'absolute';
+  video.style.left = '50%';
+  video.style.top = '50%';
+  video.style.objectFit = 'cover';
+  video.style.transform = `translate(-50%, -50%) rotate(${deg}deg)`;
 }
 
 async function captureFrame(video: HTMLVideoElement): Promise<Blob> {
@@ -54,10 +71,11 @@ async function captureFrame(video: HTMLVideoElement): Promise<Blob> {
   const W = video.videoWidth;
   const H = video.videoHeight;
   const angle = screen.orientation?.angle ?? 0;
+  const isPortraitDevice = (screen.orientation?.type ?? '').startsWith('portrait');
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d')!;
 
-  if (W > H && (angle === 0 || angle === 180)) {
+  if (W > H && isPortraitDevice) {
     // Landscape stream on portrait device — rotate to portrait
     canvas.width = H;
     canvas.height = W;
@@ -217,7 +235,9 @@ export function renderCapture(onDone?: () => void): HTMLElement {
     btn.addEventListener('click', () => captureBack(video));
     d.appendChild(btn);
 
-    openCamera(video, 'environment').catch(err => show('error', cameraErrorMessage(err)));
+    openCamera(video, 'environment')
+      .then(() => applyViewfinderTransform(video))
+      .catch(err => show('error', cameraErrorMessage(err)));
     return d;
   }
 
@@ -255,6 +275,7 @@ export function renderCapture(onDone?: () => void): HTMLElement {
     if (!video) return;
     try {
       await openCamera(video, 'user');
+      applyViewfinderTransform(video);
     } catch (err) {
       show('error', cameraErrorMessage(err));
       return;
