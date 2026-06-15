@@ -2,7 +2,7 @@ import { SLEEPING_CAT } from '../icons';
 import { clearAuth, getAuthState, type AuthState } from '../api/auth';
 import { MAX_POSTS_PER_TRIGGER } from '../state';
 import { fetchMeenowFeed, type FeedPost } from '../api/pixelfed';
-import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime } from '../timer';
+import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime, formatCountdown } from '../timer';
 
 export function renderFeed(onRequestCapture: () => void, postCount: number): HTMLElement {
   const auth = getAuthState();
@@ -13,15 +13,27 @@ export function renderFeed(onRequestCapture: () => void, postCount: number): HTM
   const header = document.createElement('header');
   header.className = 'sticky top-0 z-10 bg-cream/95 backdrop-blur-sm flex items-center justify-between px-5 py-4 border-b border-ink/10';
   const count = postCount;
+  const atQuota = count >= MAX_POSTS_PER_TRIGGER;
   header.innerHTML = `
     <h1 class="text-xl font-semibold tracking-tight text-ink">meenow</h1>
     <div class="flex items-center gap-3">
-      ${count < MAX_POSTS_PER_TRIGGER
-        ? `<button id="btn-post-again" class="text-sm font-semibold text-gold">+ Post</button>`
-        : ''}
-      <span class="text-xs text-ink/40">${count}/${MAX_POSTS_PER_TRIGGER} posted</span>
+      ${!atQuota ? `<button id="btn-post-again" class="text-sm font-semibold text-gold">+ Post</button>` : ''}
+      <span id="header-status" class="text-xs text-ink/40">${!atQuota ? `${count}/${MAX_POSTS_PER_TRIGGER} posted` : ''}</span>
     </div>
   `;
+
+  if (atQuota) {
+    const statusEl = header.querySelector('#header-status')!;
+    const nextTrigger = getNextTriggerTime();
+    const updateCountdown = (): void => {
+      if (!statusEl.isConnected) { clearInterval(intervalId); return; }
+      const ms = nextTrigger.getTime() - Date.now();
+      statusEl.textContent = ms > 0 ? `next post in ${formatCountdown(ms)}` : '';
+    };
+    updateCountdown();
+    const intervalId = setInterval(updateCountdown, 1000);
+  }
+
   el.appendChild(header);
 
   const content = document.createElement('div');

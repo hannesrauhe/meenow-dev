@@ -9,8 +9,8 @@
 //                       and see friends' posts from this period in the feed.
 //
 // The trigger time for a given calendar day is deterministic: the same date always yields
-// the same wall-clock moment, so the countdown is stable across app restarts without any
-// server coordination.
+// the same wall-clock moment, so it is stable across app restarts without any server
+// coordination.
 
 const WINDOW_START_HOUR = 9;      // 9:00 AM local
 const WINDOW_MINUTES = 12 * 60;   // 9:00 AM – 9:00 PM = 720 min
@@ -39,7 +39,7 @@ function localDateString(d = new Date()): string {
   return `${y}-${m}-${day}`;
 }
 
-export function getTriggerForDate(d: Date): Date {
+function getTriggerForDate(d: Date): Date {
   const seed = djb2(localDateString(d));
   // Three xorshift rounds are needed for adequate mixing: date strings for
   // consecutive days in the same month differ only in the last character,
@@ -53,7 +53,7 @@ export function getTriggerForDate(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), WINDOW_START_HOUR, offsetMinutes, 0, 0);
 }
 
-export function getTodayTrigger(): Date {
+function getTodayTrigger(): Date {
   return getTriggerForDate(new Date());
 }
 
@@ -86,8 +86,6 @@ export type AppState = 'awaiting_capture' | 'feed';
 
 // postCount: number of posts made in the current trigger period (fetched from server on load).
 //            0 posts → awaiting_capture regardless of time of day (no trigger gate).
-//            The before_trigger / countdown state is triggered by the caller when the
-//            per-period post quota is reached; this function never returns it.
 export function computeState(postCount: number): AppState {
   if (postCount === 0) return 'awaiting_capture';
   return 'feed';
@@ -101,10 +99,6 @@ export function formatCountdown(ms: number): string {
   if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
   if (m > 0) return `${m}m ${String(s).padStart(2, '0')}s`;
   return `${s}s`;
-}
-
-export function formatWallTime(d: Date): string {
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 // Compact date+time string for displaying the trigger period in the UI, e.g. "Jun 14, 2:30 PM".

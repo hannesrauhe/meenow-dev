@@ -37,9 +37,9 @@ Each user gets a **trigger time** derived from their local date using a determin
 The interval between two consecutive trigger times is called a **trigger period**. The **last trigger time** is the most recent trigger that has fired; the **next trigger time** is the upcoming one. A trigger period can span two calendar days (e.g., last trigger at 8 PM, next trigger the following day at 11 AM = 15 h apart).
 
 **State machine:**
-- Before the next trigger time (0 posts in current period): show a countdown arc.
-- After the next trigger time fires (0 posts in current period): prompt the user to capture (up to 2 times per trigger period).
-- After posting: show the filtered feed with a "+ Post" button for the second shot.
+- 0 posts in current period: prompt the user to capture immediately (no trigger-time gate).
+- 1 post: show the filtered feed with a "+ Post" button for the second shot.
+- 2 posts: show the feed with a live "next post in X" countdown to the next trigger time.
 
 On every app load the post count for the current trigger period is fetched unconditionally from the server (`/api/v1/accounts/{id}/statuses`, filtered to posts since the last trigger time tagged `#meenowApp`). This keeps multi-device state consistent without any localStorage synchronisation.
 
