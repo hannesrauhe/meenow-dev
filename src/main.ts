@@ -2,10 +2,9 @@ declare const __GIT_HASH__: string;
 
 import './style.css';
 import { getAuthState, handleOAuthCallback } from './api/auth';
-import { getTodayTrigger, computeState, type AppState } from './timer';
-import { postsToday, hasEverPosted, syncPostCount } from './state';
+import { getLastTriggerTime, computeState, type AppState } from './timer';
+import { MAX_POSTS_PER_TRIGGER } from './state';
 import { fetchTodayPostCount } from './api/pixelfed';
-import { renderCountdown, updateCountdownDisplay } from './screens/countdown';
 import { renderCapture } from './screens/capture';
 import { renderFeed } from './screens/feed';
 import { renderLogin } from './screens/login';
@@ -16,6 +15,15 @@ type Screen = AppState | 'login' | 'capturing';
 let activeScreen: Screen | null = null;
 let tickId: number | null = null;
 
+// Post count for the current trigger period. Fetched from the server on every
+// page load so multi-device state is always up-to-date — no localStorage cache.
+let periodPostCount = 0;
+
+// Tracks the boundary of the last known trigger period so the tick loop can
+// detect when a new period starts (trigger fires while the app is open) and
+// reset the in-memory count without requiring a page reload.
+let lastKnownTriggerMs = getLastTriggerTime().getTime();
+
 const DEV_HOSTNAMES = new Set(['dev.meenow.de', 'localhost', '127.0.0.1']);
 if (DEV_HOSTNAMES.has(window.location.hostname)) {
   const badge = document.createElement('div');
@@ -24,23 +32,26 @@ if (DEV_HOSTNAMES.has(window.location.hostname)) {
   document.body.appendChild(badge);
 }
 
+function onPosted(): void {
+  periodPostCount = Math.min(periodPostCount + 1, MAX_POSTS_PER_TRIGGER);
+}
+
 function mountCapture(): void {
   activeScreen = 'capturing';
   app.innerHTML = '';
   removeInstallNudge();
-  app.appendChild(renderCapture(() => { activeScreen = null; }));
+  app.appendChild(renderCapture(periodPostCount, onPosted, () => { activeScreen = null; }));
 }
 
 function mount(screen: AppState | 'login'): void {
   app.innerHTML = '';
   if (screen === 'login') app.appendChild(renderLogin());
-  else if (screen === 'before_trigger') app.appendChild(renderCountdown());
   else if (screen === 'awaiting_capture') {
     removeInstallNudge();
-    app.appendChild(renderCapture(() => { activeScreen = null; }));
+    app.appendChild(renderCapture(periodPostCount, onPosted, () => { activeScreen = null; }));
     return;
   } else {
-    app.appendChild(renderFeed(mountCapture));
+    app.appendChild(renderFeed(mountCapture, periodPostCount));
   }
   renderInstallNudge();
 }
@@ -48,19 +59,20 @@ function mount(screen: AppState | 'login'): void {
 function tick(): void {
   if (activeScreen === 'capturing') return;
 
-  const trigger = getTodayTrigger();
+  // Detect when a new trigger period starts while the app is open (e.g. trigger
+  // fires at 3 PM while the user is on the countdown after posting twice).
+  const currentTriggerMs = getLastTriggerTime().getTime();
+  if (currentTriggerMs !== lastKnownTriggerMs) {
+    lastKnownTriggerMs = currentTriggerMs;
+    periodPostCount = 0;
+  }
+
   const auth = getAuthState();
-  const screen: AppState | 'login' = auth
-    ? computeState(trigger, postsToday(), !hasEverPosted())
-    : 'login';
+  const screen: AppState | 'login' = auth ? computeState(periodPostCount) : 'login';
 
   if ((screen as Screen) !== activeScreen) {
     activeScreen = screen;
     mount(screen);
-  }
-
-  if (screen === 'before_trigger') {
-    updateCountdownDisplay(trigger);
   }
 }
 
@@ -76,14 +88,25 @@ async function init(): Promise<void> {
     }
   }
 
+  // Fetch the authoritative post count for the current trigger period from the
+  // server before starting the tick loop. This ensures multi-device state is
+  // correct from the first render without any localStorage synchronisation logic.
+  const auth = getAuthState();
+  if (auth) {
+    app.innerHTML = `
+      <div class="flex items-center justify-center min-h-dvh">
+        <div class="w-8 h-8 border-[3px] border-gold/30 border-t-gold rounded-full animate-spin"></div>
+      </div>
+    `;
+    try {
+      periodPostCount = Math.min(await fetchTodayPostCount(auth), MAX_POSTS_PER_TRIGGER);
+    } catch {
+      periodPostCount = 0;
+    }
+  }
+
   tick();
   tickId = window.setInterval(tick, 1000);
-
-  // Sync today's post count from server so second devices start with the right state.
-  const auth = getAuthState();
-  if (auth && postsToday() === 0) {
-    fetchTodayPostCount(auth).then(syncPostCount).catch(() => {});
-  }
 }
 
 init();

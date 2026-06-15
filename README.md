@@ -16,9 +16,9 @@ Users receive a daily prompt at a pseudo-random local time (between 9 AM and 9 P
                │                                │
                ▼                                ▼
    [ LocalStorage ]                   [ Pixelfed API Engine ]
-   • PRNG daily timer                 • Dynamic OAuth registration
-   • Camera capture state             • Token management (PKCE)
-   • "Posted today" cache             • Post with #meenowApp
+   • OAuth credentials + tokens       • Dynamic OAuth registration
+   • Install-nudge dismiss flag       • Token management (PKCE)
+                                      • Post with #meenowApp
                                       • Feed filter + blur logic
 ```
 
@@ -32,14 +32,16 @@ Users receive a daily prompt at a pseudo-random local time (between 9 AM and 9 P
 
 ### Pseudo-Random Daily Trigger
 
-Each user gets a trigger time derived from their local date using a deterministic xorshift PRNG, placing the moment somewhere in the 9 AM–9 PM window. Friends in different timezones trigger at different moments — intentionally spontaneous rather than globally simultaneous.
+Each user gets a **trigger time** derived from their local date using a deterministic xorshift PRNG, placing the moment somewhere in the 9 AM–9 PM window. Friends in different timezones trigger at different moments — intentionally spontaneous rather than globally simultaneous.
+
+The interval between two consecutive trigger times is called a **trigger period**. The **last trigger time** is the most recent trigger that has fired; the **next trigger time** is the upcoming one. A trigger period can span two calendar days (e.g., last trigger at 8 PM, next trigger the following day at 11 AM = 15 h apart).
 
 **State machine:**
-- Before trigger time: show a countdown arc.
-- After trigger time, no post today: prompt the user to capture (up to 2 times per day).
-- After posting: show the filtered feed with a "+ Post" button for the second daily shot.
+- 0 posts in current period: prompt the user to capture immediately (no trigger-time gate).
+- 1 post: show the filtered feed with a "+ Post" button for the second shot.
+- 2 posts: show the feed with a live "next post in X" countdown to the next trigger time.
 
-On app load, if `localStorage` shows no posts today, the app fetches the user’s own recent statuses from the server to detect whether a `#meenowApp` post already exists (enabling multi-device use).
+On every app load the post count for the current trigger period is fetched unconditionally from the server (`/api/v1/accounts/{id}/statuses`, filtered to posts since the last trigger time tagged `#meenowApp`). This keeps multi-device state consistent without any localStorage synchronisation.
 
 ### Dual-Camera Capture
 
@@ -65,13 +67,13 @@ No hardcoded `client_id` or `client_secret`. On first use with a given instance:
 
 1. Upload composite image via `POST /api/v1/media` (sequential first to guarantee gallery ordering), then back and front photos in parallel.
 2. `POST /api/v1/statuses` with `visibility: "private"` and caption `#meenowApp`.
-3. Write the incremented post count to `localStorage`.
+3. Increment the in-memory `periodPostCount` (no localStorage write; the server is the source of truth).
 
 ### Feed
 
 - Home timeline and own statuses merged and deduplicated.
-- Filtered to the last 24 hours; only statuses tagged `#meenowApp` are shown.
-- If the user has not posted today: images are blurred with a “Post yours to unblur” prompt.
+- Filtered to the current trigger period (posts since the last trigger time); only statuses tagged `#meenowApp` are shown.
+- If the user has not posted in the current trigger period: images are blurred with a “Post yours to unblur” prompt.
 - Empty state: sleeping cat illustration.
 
 ---

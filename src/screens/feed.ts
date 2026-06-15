@@ -1,9 +1,10 @@
 import { SLEEPING_CAT } from '../icons';
 import { clearAuth, getAuthState, type AuthState } from '../api/auth';
-import { postsToday, MAX_POSTS_PER_TRIGGER } from '../state';
+import { MAX_POSTS_PER_TRIGGER } from '../state';
 import { fetchMeenowFeed, type FeedPost } from '../api/pixelfed';
+import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime, formatCountdown } from '../timer';
 
-export function renderFeed(onRequestCapture: () => void): HTMLElement {
+export function renderFeed(onRequestCapture: () => void, postCount: number): HTMLElement {
   const auth = getAuthState();
   const el = document.createElement('div');
   el.className = 'min-h-dvh flex flex-col bg-cream';
@@ -11,16 +12,29 @@ export function renderFeed(onRequestCapture: () => void): HTMLElement {
 
   const header = document.createElement('header');
   header.className = 'sticky top-0 z-10 bg-cream/95 backdrop-blur-sm flex items-center justify-between px-5 py-4 border-b border-ink/10';
-  const count = postsToday();
+  const count = postCount;
+  const atQuota = count >= MAX_POSTS_PER_TRIGGER;
   header.innerHTML = `
     <h1 class="text-xl font-semibold tracking-tight text-ink">meenow</h1>
     <div class="flex items-center gap-3">
-      ${count < MAX_POSTS_PER_TRIGGER
-        ? `<button id="btn-post-again" class="text-sm font-semibold text-gold">+ Post</button>`
-        : ''}
-      <span class="text-xs text-ink/40">${count}/${MAX_POSTS_PER_TRIGGER} posted</span>
+      ${!atQuota ? `<button id="btn-post-again" class="text-sm font-semibold text-gold">+ Post</button>` : ''}
+      <span id="header-status" class="text-xs text-ink/40">${!atQuota ? `${count}/${MAX_POSTS_PER_TRIGGER} posted` : ''}</span>
     </div>
   `;
+
+  if (atQuota) {
+    const statusEl = header.querySelector('#header-status')!;
+    const nextTrigger = getNextTriggerTime();
+    let intervalId: number;
+    const updateCountdown = (): void => {
+      if (!statusEl.isConnected) { clearInterval(intervalId); return; }
+      const ms = nextTrigger.getTime() - Date.now();
+      statusEl.textContent = ms > 0 ? `next post in ${formatCountdown(ms)}` : '';
+    };
+    updateCountdown();
+    intervalId = setInterval(updateCountdown, 1000);
+  }
+
   el.appendChild(header);
 
   const content = document.createElement('div');
@@ -34,6 +48,12 @@ export function renderFeed(onRequestCapture: () => void): HTMLElement {
   credit.innerHTML = `Meenow is an experimental side project by <a href="https://rauhe.eu" target="_blank" rel="noopener noreferrer" class="underline underline-offset-2">Hannes Rauhe</a>`;
   footer.appendChild(credit);
 
+  const period = document.createElement('p');
+  const last = getLastTriggerTime();
+  const next = getNextTriggerTime();
+  period.textContent = `Trigger period: ${formatShortDateTime(last)} → ${formatShortDateTime(next)}`;
+  footer.appendChild(period);
+
   const logoutBtn = document.createElement('button');
   logoutBtn.className = 'text-ink/30 hover:text-ink/60 transition-colors';
   logoutBtn.textContent = 'disconnect';
@@ -46,7 +66,7 @@ export function renderFeed(onRequestCapture: () => void): HTMLElement {
     onRequestCapture();
   });
 
-  loadFeed(content, auth);
+  loadFeed(content, auth, postCount);
   return el;
 }
 
@@ -58,7 +78,7 @@ function formatRelativeTime(d: Date): string {
   return `${Math.floor(m / 60)}h ago`;
 }
 
-async function loadFeed(container: HTMLElement, auth: AuthState | null): Promise<void> {
+async function loadFeed(container: HTMLElement, auth: AuthState | null, postCount: number): Promise<void> {
   if (!auth) return;
 
   container.innerHTML = `
@@ -77,7 +97,7 @@ async function loadFeed(container: HTMLElement, auth: AuthState | null): Promise
         <button id="btn-feed-retry" class="text-sm text-gold underline underline-offset-2">Retry</button>
       </div>
     `;
-    container.querySelector('#btn-feed-retry')?.addEventListener('click', () => loadFeed(container, auth));
+    container.querySelector('#btn-feed-retry')?.addEventListener('click', () => loadFeed(container, auth, postCount));
     return;
   }
 
@@ -93,7 +113,7 @@ async function loadFeed(container: HTMLElement, auth: AuthState | null): Promise
     return;
   }
 
-  const unblurred = postsToday() > 0;
+  const unblurred = postCount > 0;
   posts.forEach(post => container.appendChild(makePostCard(post, unblurred)));
 }
 
