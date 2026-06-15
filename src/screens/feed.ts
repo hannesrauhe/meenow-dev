@@ -25,13 +25,14 @@ export function renderFeed(onRequestCapture: () => void, postCount: number): HTM
   if (atQuota) {
     const statusEl = header.querySelector('#header-status')!;
     const nextTrigger = getNextTriggerTime();
+    let intervalId: number;
     const updateCountdown = (): void => {
       if (!statusEl.isConnected) { clearInterval(intervalId); return; }
       const ms = nextTrigger.getTime() - Date.now();
       statusEl.textContent = ms > 0 ? `next post in ${formatCountdown(ms)}` : '';
     };
     updateCountdown();
-    const intervalId = setInterval(updateCountdown, 1000);
+    intervalId = setInterval(updateCountdown, 1000);
   }
 
   el.appendChild(header);

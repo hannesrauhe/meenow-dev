@@ -88,25 +88,25 @@ async function init(): Promise<void> {
     }
   }
 
-  // Start the UI immediately so users see something on every load.
-  // Fetch the authoritative post count from the server in the background.
-  // If it differs from the initial 0, force a remount via the next tick.
-  tick();
-  tickId = window.setInterval(tick, 1000);
-
+  // Fetch the authoritative post count for the current trigger period from the
+  // server before starting the tick loop. This ensures multi-device state is
+  // correct from the first render without any localStorage synchronisation logic.
   const auth = getAuthState();
   if (auth) {
-    fetchTodayPostCount(auth)
-      .then(count => {
-        const fresh = Math.min(count, MAX_POSTS_PER_TRIGGER);
-        if (fresh !== periodPostCount) {
-          periodPostCount = fresh;
-          activeScreen = null;
-          tick();
-        }
-      })
-      .catch(() => {});
+    app.innerHTML = `
+      <div class="flex items-center justify-center min-h-dvh">
+        <div class="w-8 h-8 border-[3px] border-gold/30 border-t-gold rounded-full animate-spin"></div>
+      </div>
+    `;
+    try {
+      periodPostCount = Math.min(await fetchTodayPostCount(auth), MAX_POSTS_PER_TRIGGER);
+    } catch {
+      periodPostCount = 0;
+    }
   }
+
+  tick();
+  tickId = window.setInterval(tick, 1000);
 }
 
 init();
