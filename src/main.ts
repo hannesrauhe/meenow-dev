@@ -2,10 +2,9 @@ declare const __GIT_HASH__: string;
 
 import './style.css';
 import { getAuthState, handleOAuthCallback } from './api/auth';
-import { getLastTriggerTime, getNextTriggerTime, computeState, type AppState } from './timer';
+import { getLastTriggerTime, computeState, type AppState } from './timer';
 import { MAX_POSTS_PER_TRIGGER } from './state';
 import { fetchTodayPostCount } from './api/pixelfed';
-import { renderCountdown, updateCountdownDisplay } from './screens/countdown';
 import { renderCapture } from './screens/capture';
 import { renderFeed } from './screens/feed';
 import { renderLogin } from './screens/login';
@@ -47,7 +46,6 @@ function mountCapture(): void {
 function mount(screen: AppState | 'login'): void {
   app.innerHTML = '';
   if (screen === 'login') app.appendChild(renderLogin());
-  else if (screen === 'before_trigger') app.appendChild(renderCountdown());
   else if (screen === 'awaiting_capture') {
     removeInstallNudge();
     app.appendChild(renderCapture(periodPostCount, onPosted, () => { activeScreen = null; }));
@@ -70,21 +68,11 @@ function tick(): void {
   }
 
   const auth = getAuthState();
-  // before_trigger (countdown) is shown only after the per-period quota is reached.
-  // Users with 0 posts go directly to awaiting_capture regardless of time of day.
-  const screen: AppState | 'login' = !auth
-    ? 'login'
-    : periodPostCount >= MAX_POSTS_PER_TRIGGER
-      ? 'before_trigger'
-      : computeState(periodPostCount);
+  const screen: AppState | 'login' = auth ? computeState(periodPostCount) : 'login';
 
   if ((screen as Screen) !== activeScreen) {
     activeScreen = screen;
     mount(screen);
-  }
-
-  if (screen === 'before_trigger') {
-    updateCountdownDisplay(getNextTriggerTime());
   }
 }
 

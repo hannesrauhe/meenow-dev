@@ -82,7 +82,7 @@ export function getNextTriggerTime(): Date {
   return getTriggerForDate(tomorrow);
 }
 
-export type AppState = 'before_trigger' | 'awaiting_capture' | 'feed';
+export type AppState = 'awaiting_capture' | 'feed';
 
 // postCount: number of posts made in the current trigger period (fetched from server on load).
 //            0 posts → awaiting_capture regardless of time of day (no trigger gate).
