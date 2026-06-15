@@ -2,6 +2,7 @@ import { SLEEPING_CAT } from '../icons';
 import { clearAuth, getAuthState, type AuthState } from '../api/auth';
 import { postsToday, MAX_POSTS_PER_TRIGGER } from '../state';
 import { fetchMeenowFeed, type FeedPost } from '../api/pixelfed';
+import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime } from '../timer';
 
 export function renderFeed(onRequestCapture: () => void): HTMLElement {
   const auth = getAuthState();
@@ -33,6 +34,12 @@ export function renderFeed(onRequestCapture: () => void): HTMLElement {
   const credit = document.createElement('p');
   credit.innerHTML = `Meenow is an experimental side project by <a href="https://rauhe.eu" target="_blank" rel="noopener noreferrer" class="underline underline-offset-2">Hannes Rauhe</a>`;
   footer.appendChild(credit);
+
+  const period = document.createElement('p');
+  const last = getLastTriggerTime();
+  const next = getNextTriggerTime();
+  period.textContent = `Trigger period: ${formatShortDateTime(last)} → ${formatShortDateTime(next)}`;
+  footer.appendChild(period);
 
   const logoutBtn = document.createElement('button');
   logoutBtn.className = 'text-ink/30 hover:text-ink/60 transition-colors';

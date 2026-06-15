@@ -1,14 +1,17 @@
-import { localDateString } from './timer';
+import { lastTriggerDateString } from './timer';
 
 const PREFIX = 'meenow:';
 export const MAX_POSTS_PER_TRIGGER = 2;
 
+// Posts are counted per trigger period, not per calendar day.
+// The key uses lastTriggerDateString() so that a period spanning midnight still maps
+// to a single consistent key for the whole interval.
 export function postsToday(): number {
-  return Number(localStorage.getItem(`${PREFIX}posts:${localDateString()}`) ?? '0');
+  return Number(localStorage.getItem(`${PREFIX}posts:${lastTriggerDateString()}`) ?? '0');
 }
 
 export function markPostedToday(): void {
-  localStorage.setItem(`${PREFIX}posts:${localDateString()}`, String(postsToday() + 1));
+  localStorage.setItem(`${PREFIX}posts:${lastTriggerDateString()}`, String(postsToday() + 1));
 }
 
 export function hasEverPosted(): boolean {
@@ -36,9 +39,8 @@ export function syncPostCount(serverCount: number): void {
   const local = postsToday();
   if (serverCount > local) {
     localStorage.setItem(
-      `${PREFIX}posts:${localDateString()}`,
+      `${PREFIX}posts:${lastTriggerDateString()}`,
       String(Math.min(serverCount, MAX_POSTS_PER_TRIGGER)),
     );
   }
 }
-

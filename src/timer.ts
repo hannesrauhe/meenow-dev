@@ -1,6 +1,16 @@
-// Deterministic daily trigger using djb2 hash + xorshift32 PRNG seeded by local date.
-// Same calendar day always yields the same trigger time, so re-opening the app
-// shows a consistent countdown without any server coordination.
+// Deterministic daily trigger time using djb2 hash + xorshift32 PRNG seeded by local date.
+//
+// Terminology used throughout this codebase:
+//   trigger time      – the pseudo-random moment within a day when users are prompted to post.
+//   last trigger time – the most recent trigger time that has already fired.
+//   next trigger time – the upcoming trigger time that has not yet fired.
+//   trigger period    – the interval [last trigger time, next trigger time).
+//                       Users may post up to MAX_POSTS_PER_TRIGGER times within this period
+//                       and see friends' posts from this period in the feed.
+//
+// The trigger time for a given calendar day is deterministic: the same date always yields
+// the same wall-clock moment, so the countdown is stable across app restarts without any
+// server coordination.
 
 const WINDOW_START_HOUR = 9;      // 9:00 AM local
 const WINDOW_MINUTES = 12 * 60;   // 9:00 AM – 9:00 PM = 720 min
@@ -29,32 +39,56 @@ export function localDateString(d = new Date()): string {
   return `${y}-${m}-${day}`;
 }
 
-export function getTodayTrigger(): Date {
-  const seed = djb2(localDateString());
+export function getTriggerForDate(d: Date): Date {
+  const seed = djb2(localDateString(d));
   const rand = xorshift32(seed) / 0x100000000; // uniform [0, 1)
   const offsetMinutes = Math.floor(rand * WINDOW_MINUTES);
-
-  const now = new Date();
-  return new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-    WINDOW_START_HOUR,
-    offsetMinutes,
-    0,
-    0,
-  );
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), WINDOW_START_HOUR, offsetMinutes, 0, 0);
 }
 
-export function getWindowStart(): Date {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), WINDOW_START_HOUR, 0, 0, 0);
+export function getTodayTrigger(): Date {
+  return getTriggerForDate(new Date());
+}
+
+// Returns the trigger time of the current trigger period (the most recent trigger that has fired).
+// If the current wall-clock time is before today's trigger, the last trigger time is from yesterday.
+export function getLastTriggerTime(): Date {
+  const todayTrigger = getTodayTrigger();
+  if (Date.now() >= todayTrigger.getTime()) {
+    return todayTrigger;
+  }
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  return getTriggerForDate(yesterday);
+}
+
+// Returns the trigger time of the next trigger period (the next trigger that has not yet fired).
+// If the current wall-clock time is before today's trigger, the next trigger time is today's.
+// Otherwise it is tomorrow's.
+export function getNextTriggerTime(): Date {
+  const todayTrigger = getTodayTrigger();
+  if (Date.now() < todayTrigger.getTime()) {
+    return todayTrigger;
+  }
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return getTriggerForDate(tomorrow);
+}
+
+// The calendar-date string of the last trigger time. Used as the localStorage key for post counts
+// so that the count always reflects posts made within the current trigger period, even when
+// that period spans two calendar days.
+export function lastTriggerDateString(): string {
+  return localDateString(getLastTriggerTime());
 }
 
 export type AppState = 'before_trigger' | 'awaiting_capture' | 'feed';
 
-export function computeState(trigger: Date, postCount: number, isNewUser: boolean): AppState {
-  if (!isNewUser && postCount === 0 && Date.now() < trigger.getTime()) return 'before_trigger';
+// nextTrigger: the trigger time the user is waiting for (returned by getNextTriggerTime()).
+// postCount:   number of posts made in the current trigger period.
+// isNewUser:   true if the user has never posted; new users skip before_trigger on first open.
+export function computeState(nextTrigger: Date, postCount: number, isNewUser: boolean): AppState {
+  if (!isNewUser && postCount === 0 && Date.now() < nextTrigger.getTime()) return 'before_trigger';
   if (postCount === 0) return 'awaiting_capture';
   return 'feed';
 }
@@ -71,4 +105,9 @@ export function formatCountdown(ms: number): string {
 
 export function formatWallTime(d: Date): string {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+// Compact date+time string for displaying the trigger period in the UI, e.g. "Jun 14, 2:30 PM".
+export function formatShortDateTime(d: Date): string {
+  return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }

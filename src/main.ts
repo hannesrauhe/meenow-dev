@@ -2,7 +2,7 @@ declare const __GIT_HASH__: string;
 
 import './style.css';
 import { getAuthState, handleOAuthCallback } from './api/auth';
-import { getTodayTrigger, computeState, type AppState } from './timer';
+import { getNextTriggerTime, computeState, type AppState } from './timer';
 import { postsToday, hasEverPosted, syncPostCount } from './state';
 import { fetchTodayPostCount } from './api/pixelfed';
 import { renderCountdown, updateCountdownDisplay } from './screens/countdown';
@@ -48,7 +48,7 @@ function mount(screen: AppState | 'login'): void {
 function tick(): void {
   if (activeScreen === 'capturing') return;
 
-  const trigger = getTodayTrigger();
+  const trigger = getNextTriggerTime();
   const auth = getAuthState();
   const screen: AppState | 'login' = auth
     ? computeState(trigger, postsToday(), !hasEverPosted())

@@ -43,7 +43,8 @@ To ship to production: open a PR from `hannesrauhe/meenow:main` into `meenow-de/
 
 ## Key architecture notes
 
-- **State machine** lives in `src/timer.ts` (`computeState`) and is driven by a 1-second `setInterval` tick in `src/main.ts`. States: `before_trigger` → `awaiting_capture` → `feed`.
+- **Trigger time terminology**: A *trigger time* is the pseudo-random daily moment when users are prompted to post. The *last trigger time* is the most recent trigger that has fired; the *next trigger time* is the upcoming one. The interval between them is the *trigger period*. A period can span two calendar days.
+- **State machine** lives in `src/timer.ts` (`computeState`) and is driven by a 1-second `setInterval` tick in `src/main.ts`. States: `before_trigger` → `awaiting_capture` → `feed`. The tick uses `getNextTriggerTime()` for the transition check. Post counts are keyed by `lastTriggerDateString()` (the calendar date of the last trigger time, not necessarily today) so the count remains correct across midnight within a trigger period.
 - **`activeScreen`** in `main.ts` tracks what is currently mounted. The special `'capturing'` value pauses the tick loop during the second-post flow so it does not unmount the in-progress capture screen.
 - **Screen mounting** is done by `mount()` and `mountCapture()` in `main.ts`. Screens must not manipulate `#app` directly — use the `onRequestCapture` / `onDone` callbacks instead.
 - **Auth** is read from localStorage via `getAuthState()`. The app auto-registers itself as an OAuth client on first login per Pixelfed instance, so each domain (`dev.meenow.de`, `meenow.de`) registers independently.
