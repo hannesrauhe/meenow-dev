@@ -2,7 +2,7 @@ declare const __GIT_HASH__: string;
 
 import './style.css';
 import { getAuthState, handleOAuthCallback } from './api/auth';
-import { getTodayTrigger, computeState, type AppState } from './timer';
+import { getLastTriggerTime, getNextTriggerTime, computeState, type AppState } from './timer';
 import { MAX_POSTS_PER_TRIGGER } from './state';
 import { fetchTodayPostCount } from './api/pixelfed';
 import { renderCountdown, updateCountdownDisplay } from './screens/countdown';
@@ -19,6 +19,11 @@ let tickId: number | null = null;
 // Post count for the current trigger period. Fetched from the server on every
 // page load so multi-device state is always up-to-date — no localStorage cache.
 let periodPostCount = 0;
+
+// Tracks the boundary of the last known trigger period so the tick loop can
+// detect when a new period starts (trigger fires while the app is open) and
+// reset the in-memory count without requiring a page reload.
+let lastKnownTriggerMs = getLastTriggerTime().getTime();
 
 const DEV_HOSTNAMES = new Set(['dev.meenow.de', 'localhost', '127.0.0.1']);
 if (DEV_HOSTNAMES.has(window.location.hostname)) {
@@ -56,11 +61,22 @@ function mount(screen: AppState | 'login'): void {
 function tick(): void {
   if (activeScreen === 'capturing') return;
 
-  const trigger = getTodayTrigger();
+  // Detect when a new trigger period starts while the app is open (e.g. trigger
+  // fires at 3 PM while the user is on the countdown after posting twice).
+  const currentTriggerMs = getLastTriggerTime().getTime();
+  if (currentTriggerMs !== lastKnownTriggerMs) {
+    lastKnownTriggerMs = currentTriggerMs;
+    periodPostCount = 0;
+  }
+
   const auth = getAuthState();
-  const screen: AppState | 'login' = auth
-    ? computeState(trigger, periodPostCount)
-    : 'login';
+  // before_trigger (countdown) is shown only after the per-period quota is reached.
+  // Users with 0 posts go directly to awaiting_capture regardless of time of day.
+  const screen: AppState | 'login' = !auth
+    ? 'login'
+    : periodPostCount >= MAX_POSTS_PER_TRIGGER
+      ? 'before_trigger'
+      : computeState(periodPostCount);
 
   if ((screen as Screen) !== activeScreen) {
     activeScreen = screen;
@@ -68,7 +84,7 @@ function tick(): void {
   }
 
   if (screen === 'before_trigger') {
-    updateCountdownDisplay(trigger);
+    updateCountdownDisplay(getNextTriggerTime());
   }
 }
 

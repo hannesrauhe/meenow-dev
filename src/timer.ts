@@ -84,12 +84,11 @@ export function getNextTriggerTime(): Date {
 
 export type AppState = 'before_trigger' | 'awaiting_capture' | 'feed';
 
-// todayTrigger: today's trigger time (returned by getTodayTrigger()).
-//               Before it fires (now < todayTrigger): users with 0 posts wait in before_trigger.
-//               After it fires (now >= todayTrigger): the condition is false → awaiting_capture.
-// postCount:    number of posts made in the current trigger period (fetched from server on load).
-export function computeState(todayTrigger: Date, postCount: number): AppState {
-  if (postCount === 0 && Date.now() < todayTrigger.getTime()) return 'before_trigger';
+// postCount: number of posts made in the current trigger period (fetched from server on load).
+//            0 posts → awaiting_capture regardless of time of day (no trigger gate).
+//            The before_trigger / countdown state is triggered by the caller when the
+//            per-period post quota is reached; this function never returns it.
+export function computeState(postCount: number): AppState {
   if (postCount === 0) return 'awaiting_capture';
   return 'feed';
 }
