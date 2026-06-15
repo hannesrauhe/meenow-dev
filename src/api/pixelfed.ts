@@ -160,7 +160,7 @@ export async function fetchMeenowFeed(auth: AuthState): Promise<FeedPost[]> {
       if (seen.has(s.id)) return false;
       seen.add(s.id);
       return (
-        new Date(s.created_at).getTime() > cutoff &&
+        new Date(s.created_at).getTime() >= cutoff &&
         s.media_attachments.length > 0 &&
         s.tags.some(t => t.name.toLowerCase() === 'meenowapp')
       );

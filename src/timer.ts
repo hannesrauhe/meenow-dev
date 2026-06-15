@@ -32,7 +32,7 @@ function xorshift32(seed: number): number {
   return x >>> 0;
 }
 
-export function localDateString(d = new Date()): string {
+function localDateString(d = new Date()): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -84,11 +84,13 @@ export function lastTriggerDateString(): string {
 
 export type AppState = 'before_trigger' | 'awaiting_capture' | 'feed';
 
-// nextTrigger: the trigger time the user is waiting for (returned by getNextTriggerTime()).
-// postCount:   number of posts made in the current trigger period.
-// isNewUser:   true if the user has never posted; new users skip before_trigger on first open.
-export function computeState(nextTrigger: Date, postCount: number, isNewUser: boolean): AppState {
-  if (!isNewUser && postCount === 0 && Date.now() < nextTrigger.getTime()) return 'before_trigger';
+// todayTrigger: today's trigger time (returned by getTodayTrigger()).
+//               Before it fires (now < todayTrigger): returning users with 0 posts wait in before_trigger.
+//               After it fires (now >= todayTrigger): the condition is false, so they move to awaiting_capture.
+// postCount:    number of posts made in the current trigger period.
+// isNewUser:    true if the user has never posted; new users skip before_trigger on first open.
+export function computeState(todayTrigger: Date, postCount: number, isNewUser: boolean): AppState {
+  if (!isNewUser && postCount === 0 && Date.now() < todayTrigger.getTime()) return 'before_trigger';
   if (postCount === 0) return 'awaiting_capture';
   return 'feed';
 }

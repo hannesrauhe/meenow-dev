@@ -35,11 +35,13 @@ export function isPwaInstalled(): boolean {
   );
 }
 
-export function syncPostCount(serverCount: number): void {
-  const local = postsToday();
+// dateKey should be snapshotted before any async operation so a trigger firing
+// during a network fetch cannot write the old period's count into the new period's key.
+export function syncPostCount(serverCount: number, dateKey = lastTriggerDateString()): void {
+  const local = Number(localStorage.getItem(`${PREFIX}posts:${dateKey}`) ?? '0');
   if (serverCount > local) {
     localStorage.setItem(
-      `${PREFIX}posts:${lastTriggerDateString()}`,
+      `${PREFIX}posts:${dateKey}`,
       String(Math.min(serverCount, MAX_POSTS_PER_TRIGGER)),
     );
   }

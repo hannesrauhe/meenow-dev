@@ -2,7 +2,7 @@ declare const __GIT_HASH__: string;
 
 import './style.css';
 import { getAuthState, handleOAuthCallback } from './api/auth';
-import { getNextTriggerTime, computeState, type AppState } from './timer';
+import { getTodayTrigger, computeState, type AppState, lastTriggerDateString } from './timer';
 import { postsToday, hasEverPosted, syncPostCount } from './state';
 import { fetchTodayPostCount } from './api/pixelfed';
 import { renderCountdown, updateCountdownDisplay } from './screens/countdown';
@@ -48,7 +48,7 @@ function mount(screen: AppState | 'login'): void {
 function tick(): void {
   if (activeScreen === 'capturing') return;
 
-  const trigger = getNextTriggerTime();
+  const trigger = getTodayTrigger();
   const auth = getAuthState();
   const screen: AppState | 'login' = auth
     ? computeState(trigger, postsToday(), !hasEverPosted())
@@ -80,9 +80,12 @@ async function init(): Promise<void> {
   tickId = window.setInterval(tick, 1000);
 
   // Sync today's post count from server so second devices start with the right state.
+  // Snapshot the period key now so that if the trigger fires during the fetch the
+  // server count lands in the correct period's localStorage entry.
   const auth = getAuthState();
   if (auth && postsToday() === 0) {
-    fetchTodayPostCount(auth).then(syncPostCount).catch(() => {});
+    const periodKey = lastTriggerDateString();
+    fetchTodayPostCount(auth).then(count => syncPostCount(count, periodKey)).catch(() => {});
   }
 }
 
