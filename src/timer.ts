@@ -41,7 +41,14 @@ function localDateString(d = new Date()): string {
 
 export function getTriggerForDate(d: Date): Date {
   const seed = djb2(localDateString(d));
-  const rand = xorshift32(seed) / 0x100000000; // uniform [0, 1)
+  // Three xorshift rounds are needed for adequate mixing: date strings for
+  // consecutive days in the same month differ only in the last character,
+  // giving djb2 hashes that are too close for a single round to spread across
+  // the 720-minute window (every day in June 2026 lands at ~16:50 with one round).
+  let x = xorshift32(seed);
+  x = xorshift32(x);
+  x = xorshift32(x);
+  const rand = x / 0x100000000; // uniform [0, 1)
   const offsetMinutes = Math.floor(rand * WINDOW_MINUTES);
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), WINDOW_START_HOUR, offsetMinutes, 0, 0);
 }
