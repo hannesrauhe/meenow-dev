@@ -82,22 +82,14 @@ export function getNextTriggerTime(): Date {
   return getTriggerForDate(tomorrow);
 }
 
-// The calendar-date string of the last trigger time. Used as the localStorage key for post counts
-// so that the count always reflects posts made within the current trigger period, even when
-// that period spans two calendar days.
-export function lastTriggerDateString(): string {
-  return localDateString(getLastTriggerTime());
-}
-
 export type AppState = 'before_trigger' | 'awaiting_capture' | 'feed';
 
 // todayTrigger: today's trigger time (returned by getTodayTrigger()).
-//               Before it fires (now < todayTrigger): returning users with 0 posts wait in before_trigger.
-//               After it fires (now >= todayTrigger): the condition is false, so they move to awaiting_capture.
-// postCount:    number of posts made in the current trigger period.
-// isNewUser:    true if the user has never posted; new users skip before_trigger on first open.
-export function computeState(todayTrigger: Date, postCount: number, isNewUser: boolean): AppState {
-  if (!isNewUser && postCount === 0 && Date.now() < todayTrigger.getTime()) return 'before_trigger';
+//               Before it fires (now < todayTrigger): users with 0 posts wait in before_trigger.
+//               After it fires (now >= todayTrigger): the condition is false → awaiting_capture.
+// postCount:    number of posts made in the current trigger period (fetched from server on load).
+export function computeState(todayTrigger: Date, postCount: number): AppState {
+  if (postCount === 0 && Date.now() < todayTrigger.getTime()) return 'before_trigger';
   if (postCount === 0) return 'awaiting_capture';
   return 'feed';
 }

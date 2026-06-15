@@ -1,31 +1,13 @@
-import { lastTriggerDateString } from './timer';
-
-const PREFIX = 'meenow:';
 export const MAX_POSTS_PER_TRIGGER = 2;
 
-// Posts are counted per trigger period, not per calendar day.
-// The key uses lastTriggerDateString() so that a period spanning midnight still maps
-// to a single consistent key for the whole interval.
-export function postsToday(): number {
-  return Number(localStorage.getItem(`${PREFIX}posts:${lastTriggerDateString()}`) ?? '0');
-}
-
-export function markPostedToday(): void {
-  localStorage.setItem(`${PREFIX}posts:${lastTriggerDateString()}`, String(postsToday() + 1));
-}
-
-export function hasEverPosted(): boolean {
-  return Object.keys(localStorage).some(k => k.startsWith(`${PREFIX}posts:`));
-}
-
 export function isInstallDismissed(): boolean {
-  const raw = localStorage.getItem(`${PREFIX}install-dismiss`);
+  const raw = localStorage.getItem('meenow:install-dismiss');
   if (!raw) return false;
   return Date.now() - Number(raw) < 7 * 24 * 60 * 60 * 1000;
 }
 
 export function dismissInstall(): void {
-  localStorage.setItem(`${PREFIX}install-dismiss`, String(Date.now()));
+  localStorage.setItem('meenow:install-dismiss', String(Date.now()));
 }
 
 export function isPwaInstalled(): boolean {
@@ -33,16 +15,4 @@ export function isPwaInstalled(): boolean {
     window.matchMedia('(display-mode: standalone)').matches ||
     (navigator as Navigator & { standalone?: boolean }).standalone === true
   );
-}
-
-// dateKey should be snapshotted before any async operation so a trigger firing
-// during a network fetch cannot write the old period's count into the new period's key.
-export function syncPostCount(serverCount: number, dateKey = lastTriggerDateString()): void {
-  const local = Number(localStorage.getItem(`${PREFIX}posts:${dateKey}`) ?? '0');
-  if (serverCount > local) {
-    localStorage.setItem(
-      `${PREFIX}posts:${dateKey}`,
-      String(Math.min(serverCount, MAX_POSTS_PER_TRIGGER)),
-    );
-  }
 }

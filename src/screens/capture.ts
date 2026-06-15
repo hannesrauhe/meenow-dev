@@ -1,4 +1,4 @@
-import { markPostedToday, postsToday, MAX_POSTS_PER_TRIGGER } from '../state';
+import { MAX_POSTS_PER_TRIGGER } from '../state';
 
 const CAMERA_SWITCH_DELAY_MS = 600; // browser needs time to release back camera before front opens
 import { getAuthState } from '../api/auth';
@@ -163,7 +163,7 @@ function cameraErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Could not access camera.';
 }
 
-export function renderCapture(onDone?: () => void): HTMLElement {
+export function renderCapture(postCount: number, onPosted: () => void, onDone?: () => void): HTMLElement {
   const root = document.createElement('div');
   root.id = 'screen-capture';
 
@@ -190,7 +190,7 @@ export function renderCapture(onDone?: () => void): HTMLElement {
   }
 
   function makeStart(): HTMLElement {
-    const count = postsToday();
+    const count = postCount;
     const isSecond = count === MAX_POSTS_PER_TRIGGER - 1;
     const d = document.createElement('div');
     d.className = 'flex flex-col items-center gap-8';
@@ -336,7 +336,7 @@ export function renderCapture(onDone?: () => void): HTMLElement {
     if (!auth) { show('error', 'Not logged in.'); return; }
     try {
       await postMeenow(auth, compositeBlob!, backBlob!, frontBlob!);
-      markPostedToday();
+      onPosted();
       onDone?.();
     } catch (err) {
       show('error', err instanceof Error ? err.message : 'Upload failed.');

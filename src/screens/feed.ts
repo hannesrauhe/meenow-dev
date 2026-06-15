@@ -1,10 +1,10 @@
 import { SLEEPING_CAT } from '../icons';
 import { clearAuth, getAuthState, type AuthState } from '../api/auth';
-import { postsToday, MAX_POSTS_PER_TRIGGER } from '../state';
+import { MAX_POSTS_PER_TRIGGER } from '../state';
 import { fetchMeenowFeed, type FeedPost } from '../api/pixelfed';
 import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime } from '../timer';
 
-export function renderFeed(onRequestCapture: () => void): HTMLElement {
+export function renderFeed(onRequestCapture: () => void, postCount: number): HTMLElement {
   const auth = getAuthState();
   const el = document.createElement('div');
   el.className = 'min-h-dvh flex flex-col bg-cream';
@@ -12,7 +12,7 @@ export function renderFeed(onRequestCapture: () => void): HTMLElement {
 
   const header = document.createElement('header');
   header.className = 'sticky top-0 z-10 bg-cream/95 backdrop-blur-sm flex items-center justify-between px-5 py-4 border-b border-ink/10';
-  const count = postsToday();
+  const count = postCount;
   header.innerHTML = `
     <h1 class="text-xl font-semibold tracking-tight text-ink">meenow</h1>
     <div class="flex items-center gap-3">
@@ -53,7 +53,7 @@ export function renderFeed(onRequestCapture: () => void): HTMLElement {
     onRequestCapture();
   });
 
-  loadFeed(content, auth);
+  loadFeed(content, auth, postCount);
   return el;
 }
 
@@ -65,7 +65,7 @@ function formatRelativeTime(d: Date): string {
   return `${Math.floor(m / 60)}h ago`;
 }
 
-async function loadFeed(container: HTMLElement, auth: AuthState | null): Promise<void> {
+async function loadFeed(container: HTMLElement, auth: AuthState | null, postCount: number): Promise<void> {
   if (!auth) return;
 
   container.innerHTML = `
@@ -84,7 +84,7 @@ async function loadFeed(container: HTMLElement, auth: AuthState | null): Promise
         <button id="btn-feed-retry" class="text-sm text-gold underline underline-offset-2">Retry</button>
       </div>
     `;
-    container.querySelector('#btn-feed-retry')?.addEventListener('click', () => loadFeed(container, auth));
+    container.querySelector('#btn-feed-retry')?.addEventListener('click', () => loadFeed(container, auth, postCount));
     return;
   }
 
@@ -100,7 +100,7 @@ async function loadFeed(container: HTMLElement, auth: AuthState | null): Promise
     return;
   }
 
-  const unblurred = postsToday() > 0;
+  const unblurred = postCount > 0;
   posts.forEach(post => container.appendChild(makePostCard(post, unblurred)));
 }
 
