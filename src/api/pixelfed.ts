@@ -1,5 +1,6 @@
 import type { AuthState } from './auth';
 import { patchAccountId } from './auth';
+import { getLastTriggerTime } from '../timer';
 
 // --- Mastodon/Pixelfed API types ---
 
@@ -122,7 +123,7 @@ function toFeedPost(s: MastodonStatus): FeedPost {
 }
 
 export async function fetchMeenowFeed(auth: AuthState): Promise<FeedPost[]> {
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  const cutoff = getLastTriggerTime().getTime();
 
   // Backfill accountId for users who logged in before it was stored
   let accountId = auth.accountId;
@@ -159,7 +160,7 @@ export async function fetchMeenowFeed(auth: AuthState): Promise<FeedPost[]> {
       if (seen.has(s.id)) return false;
       seen.add(s.id);
       return (
-        new Date(s.created_at).getTime() > cutoff &&
+        new Date(s.created_at).getTime() >= cutoff &&
         s.media_attachments.length > 0 &&
         s.tags.some(t => t.name.toLowerCase() === 'meenowapp')
       );
@@ -170,8 +171,7 @@ export async function fetchMeenowFeed(auth: AuthState): Promise<FeedPost[]> {
 
 export async function fetchTodayPostCount(auth: AuthState): Promise<number> {
   if (!auth.accountId) return 0;
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  const periodStart = getLastTriggerTime().getTime();
   try {
     const res = await fetch(
       `https://${auth.instance}/api/v1/accounts/${auth.accountId}/statuses?limit=10&exclude_replies=true`,
@@ -180,7 +180,7 @@ export async function fetchTodayPostCount(auth: AuthState): Promise<number> {
     if (!res.ok) return 0;
     const statuses = await res.json() as MastodonStatus[];
     return statuses.filter(s =>
-      new Date(s.created_at).getTime() >= todayStart.getTime() &&
+      new Date(s.created_at).getTime() >= periodStart &&
       s.tags.some(t => t.name.toLowerCase() === 'meenowapp'),
     ).length;
   } catch {
