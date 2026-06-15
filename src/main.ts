@@ -3,7 +3,7 @@ declare const __GIT_HASH__: string;
 import './style.css';
 import { getAuthState, handleOAuthCallback } from './api/auth';
 import { getTodayTrigger, computeState, type AppState, lastTriggerDateString } from './timer';
-import { postsToday, hasEverPosted, syncPostCount } from './state';
+import { postsToday, hasEverPosted, syncPostCount, MAX_POSTS_PER_TRIGGER } from './state';
 import { fetchTodayPostCount } from './api/pixelfed';
 import { renderCountdown, updateCountdownDisplay } from './screens/countdown';
 import { renderCapture } from './screens/capture';
@@ -83,7 +83,7 @@ async function init(): Promise<void> {
   // Snapshot the period key now so that if the trigger fires during the fetch the
   // server count lands in the correct period's localStorage entry.
   const auth = getAuthState();
-  if (auth && postsToday() === 0) {
+  if (auth && postsToday() < MAX_POSTS_PER_TRIGGER) {
     const periodKey = lastTriggerDateString();
     fetchTodayPostCount(auth).then(count => syncPostCount(count, periodKey)).catch(() => {});
   }
