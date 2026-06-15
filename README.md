@@ -16,9 +16,9 @@ Users receive a daily prompt at a pseudo-random local time (between 9 AM and 9 P
                │                                │
                ▼                                ▼
    [ LocalStorage ]                   [ Pixelfed API Engine ]
-   • PRNG trigger timer               • Dynamic OAuth registration
-   • Camera capture state             • Token management (PKCE)
-   • Posts-per-trigger-period cache   • Post with #meenowApp
+   • OAuth credentials + tokens       • Dynamic OAuth registration
+   • Install-nudge dismiss flag       • Token management (PKCE)
+                                      • Post with #meenowApp
                                       • Feed filter + blur logic
 ```
 
@@ -41,7 +41,7 @@ The interval between two consecutive trigger times is called a **trigger period*
 - After the next trigger time fires (0 posts in current period): prompt the user to capture (up to 2 times per trigger period).
 - After posting: show the filtered feed with a "+ Post" button for the second shot.
 
-On app load, if `localStorage` shows no posts for the current trigger period, the app fetches the user’s own recent statuses from the server to detect whether a `#meenowApp` post already exists within the period (enabling multi-device use).
+On every app load the post count for the current trigger period is fetched unconditionally from the server (`/api/v1/accounts/{id}/statuses`, filtered to posts since the last trigger time tagged `#meenowApp`). This keeps multi-device state consistent without any localStorage synchronisation.
 
 ### Dual-Camera Capture
 
@@ -67,7 +67,7 @@ No hardcoded `client_id` or `client_secret`. On first use with a given instance:
 
 1. Upload composite image via `POST /api/v1/media` (sequential first to guarantee gallery ordering), then back and front photos in parallel.
 2. `POST /api/v1/statuses` with `visibility: "private"` and caption `#meenowApp`.
-3. Write the incremented post count to `localStorage`.
+3. Increment the in-memory `periodPostCount` (no localStorage write; the server is the source of truth).
 
 ### Feed
 
