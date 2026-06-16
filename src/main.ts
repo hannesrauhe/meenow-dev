@@ -9,6 +9,7 @@ import { renderCapture } from './screens/capture';
 import { renderFeed } from './screens/feed';
 import { renderLogin } from './screens/login';
 import { renderInstallNudge, removeInstallNudge } from './components/installNudge';
+import { renderNotificationNudge, removeNotificationNudge } from './components/notificationNudge';
 
 const app = document.getElementById('app')!;
 type Screen = AppState | 'login' | 'capturing';
@@ -40,17 +41,22 @@ function mountCapture(): void {
   activeScreen = 'capturing';
   app.innerHTML = '';
   removeInstallNudge();
+  removeNotificationNudge();
   app.appendChild(renderCapture(periodPostCount, onPosted, () => { activeScreen = null; }));
 }
 
 function mount(screen: AppState | 'login'): void {
   app.innerHTML = '';
-  if (screen === 'login') app.appendChild(renderLogin());
-  else if (screen === 'awaiting_capture') {
+  if (screen === 'login') {
+    removeNotificationNudge();
+    app.appendChild(renderLogin());
+  } else if (screen === 'awaiting_capture') {
     removeInstallNudge();
     app.appendChild(renderCapture(periodPostCount, onPosted, () => { activeScreen = null; }));
+    void renderNotificationNudge();
     return;
   } else {
+    removeNotificationNudge();
     app.appendChild(renderFeed(mountCapture, periodPostCount));
   }
   renderInstallNudge();
