@@ -12,6 +12,9 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       manifest: {
         name: 'meenow',
         short_name: 'meenow',
@@ -25,8 +28,12 @@ export default defineConfig({
           { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' },
         ],
       },
-      workbox: {
+      injectManifest: {
         globPatterns: ['**/*.{js,css,html,svg}'],
+      },
+      devOptions: {
+        enabled: true,
+        type: 'module',
       },
     }),
   ],

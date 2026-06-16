@@ -3,6 +3,7 @@ import { clearAuth, getAuthState, type AuthState } from '../api/auth';
 import { MAX_POSTS_PER_TRIGGER } from '../state';
 import { fetchMeenowFeed, type FeedPost } from '../api/pixelfed';
 import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime, formatCountdown } from '../timer';
+import { isPushSupported, isNotificationsEnabled, enableNotifications } from '../notifications';
 
 export function renderFeed(onRequestCapture: () => void, postCount: number): HTMLElement {
   const auth = getAuthState();
@@ -53,6 +54,29 @@ export function renderFeed(onRequestCapture: () => void, postCount: number): HTM
   const next = getNextTriggerTime();
   period.textContent = `Trigger period: ${formatShortDateTime(last)} → ${formatShortDateTime(next)}`;
   footer.appendChild(period);
+
+  if (isPushSupported() && Notification.permission !== 'denied') {
+    const notifBtn = document.createElement('button');
+    notifBtn.className = 'text-ink/40 hover:text-ink/60 transition-colors text-xs';
+    notifBtn.textContent = 'Enable daily notifications';
+    notifBtn.addEventListener('click', async () => {
+      notifBtn.disabled = true;
+      notifBtn.textContent = '…';
+      const result = await enableNotifications();
+      if (result === 'granted') {
+        notifBtn.textContent = 'Notifications enabled';
+      } else if (result === 'denied') {
+        notifBtn.textContent = 'Permission denied';
+      } else {
+        notifBtn.textContent = 'Could not register — try again';
+        notifBtn.disabled = false;
+      }
+    });
+    void isNotificationsEnabled().then(enabled => {
+      if (enabled) { notifBtn.textContent = 'Notifications enabled'; notifBtn.disabled = true; }
+    });
+    footer.appendChild(notifBtn);
+  }
 
   const logoutBtn = document.createElement('button');
   logoutBtn.className = 'text-ink/30 hover:text-ink/60 transition-colors';
