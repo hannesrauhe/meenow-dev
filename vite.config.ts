@@ -4,37 +4,52 @@ import { execSync } from 'child_process';
 
 const GIT_HASH = execSync('git rev-parse --short HEAD').toString().trim();
 
-export default defineConfig({
-  base: '/',
-  define: {
-    __GIT_HASH__: JSON.stringify(GIT_HASH),
-  },
-  plugins: [
-    VitePWA({
-      registerType: 'autoUpdate',
-      strategies: 'injectManifest',
-      srcDir: 'src',
-      filename: 'sw.ts',
-      manifest: {
-        name: 'meenow',
-        short_name: 'meenow',
-        description: 'Daily spontaneous photo sharing with friends via Pixelfed',
-        theme_color: '#FDFBF7',
-        background_color: '#FDFBF7',
-        display: 'standalone',
-        orientation: 'any',
-        start_url: '/',
-        icons: [
-          { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' },
-        ],
-      },
-      injectManifest: {
-        globPatterns: ['**/*.{js,css,html,svg}'],
-      },
-      devOptions: {
-        enabled: true,
-        type: 'module',
-      },
-    }),
-  ],
+const REQUIRED_ENV = [
+  'VITE_VAPID_PUBLIC_KEY',
+  'VITE_PUSH_RELAY_TOKEN',
+  'VITE_PUSH_SUBS_PATH',
+] as const;
+
+export default defineConfig(({ command }) => {
+  if (command === 'build') {
+    const missing = REQUIRED_ENV.filter(key => !process.env[key]);
+    if (missing.length > 0) {
+      throw new Error(`Missing required environment variables:\n${missing.map(k => `  ${k}`).join('\n')}`);
+    }
+  }
+
+  return {
+    base: '/',
+    define: {
+      __GIT_HASH__: JSON.stringify(GIT_HASH),
+    },
+    plugins: [
+      VitePWA({
+        registerType: 'autoUpdate',
+        strategies: 'injectManifest',
+        srcDir: 'src',
+        filename: 'sw.ts',
+        manifest: {
+          name: 'meenow',
+          short_name: 'meenow',
+          description: 'Daily spontaneous photo sharing with friends via Pixelfed',
+          theme_color: '#FDFBF7',
+          background_color: '#FDFBF7',
+          display: 'standalone',
+          orientation: 'any',
+          start_url: '/',
+          icons: [
+            { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' },
+          ],
+        },
+        injectManifest: {
+          globPatterns: ['**/*.{js,css,html,svg}'],
+        },
+        devOptions: {
+          enabled: true,
+          type: 'module',
+        },
+      }),
+    ],
+  };
 });
