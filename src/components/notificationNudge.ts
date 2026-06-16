@@ -14,7 +14,7 @@ export async function renderNotificationNudge(): Promise<void> {
   banner.className = [
     'fixed bottom-0 left-0 right-0 z-50',
     'bg-ink text-cream',
-    'px-5 pt-4 pb-4',
+    'px-5 pt-4 safe-area-bottom',
     'flex items-start gap-4',
     'border-t border-white/10',
   ].join(' ');

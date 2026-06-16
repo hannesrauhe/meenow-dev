@@ -56,8 +56,8 @@ function mount(screen: AppState | 'login'): void {
     void renderNotificationNudge();
     return;
   } else {
-    removeNotificationNudge();
     app.appendChild(renderFeed(mountCapture, periodPostCount));
+    void renderNotificationNudge();
   }
   renderInstallNudge();
 }
