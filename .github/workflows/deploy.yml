@@ -21,7 +21,12 @@ jobs:
         with:
           node-version: '20'
       - run: npm install
-      - run: npm run build
+      - name: Build
+        env:
+          VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
+          VITE_PUSH_RELAY_TOKEN: ${{ secrets.VITE_PUSH_RELAY_TOKEN }}
+          VITE_PUSH_SUBS_PATH: ${{ secrets.VITE_PUSH_SUBS_PATH }}
+        run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

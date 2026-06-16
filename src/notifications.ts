@@ -1,9 +1,11 @@
-const VAPID_PUBLIC_KEY = 'BB9x-5V5iQvI8gJNjw0dKzjWC5VC06xYT5VgW8_UKsz_Heh6_z1LWrsHJtI7Gw5ukxt9Lza_-gcDtJbOrLtCvfw';
-// Fine-grained PAT: Contents:Write on meenow-de/meenow-push only.
-// Risk if leaked: attacker can create/delete subscription files but cannot send
-// push notifications (that requires the VAPID private key, stored as a server-side secret).
-const PUSH_RELAY_TOKEN = 'REPLACE_WITH_FINE_GRAINED_PAT';
+// These are injected at build time from GitHub repo secrets (VITE_* prefix).
+// Each deployed instance (dev.meenow.de, meenow.de) has its own secret values,
+// which keeps their VAPID keys and subscription sets isolated.
+const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY as string;
+const PUSH_RELAY_TOKEN = import.meta.env.VITE_PUSH_RELAY_TOKEN as string;
 const PUSH_RELAY_REPO = 'meenow-de/meenow-push';
+// e.g. 'subscriptions/dev' or 'subscriptions/prod'
+const PUSH_SUBS_PATH = import.meta.env.VITE_PUSH_SUBS_PATH as string;
 
 function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   const padding = '='.repeat((4 - (base64.length % 4)) % 4);
@@ -37,7 +39,7 @@ export async function enableNotifications(): Promise<'granted' | 'denied' | 'err
     });
   }
 
-  const filename = `subscriptions/${crypto.randomUUID()}.json`;
+  const filename = `${PUSH_SUBS_PATH}/${crypto.randomUUID()}.json`;
   const content = btoa(JSON.stringify(sub.toJSON()));
   const res = await fetch(
     `https://api.github.com/repos/${PUSH_RELAY_REPO}/contents/${filename}`,

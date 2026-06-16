@@ -1,5 +1,5 @@
 import webpush from 'web-push';
-import { readdirSync, readFileSync, rmSync } from 'fs';
+import { readdirSync, readFileSync, rmSync, mkdirSync } from 'fs';
 
 webpush.setVapidDetails(
   process.env.VAPID_SUBJECT,
@@ -8,6 +8,7 @@ webpush.setVapidDetails(
 );
 
 const subsDir = process.env.SUBS_DIR ?? 'subscriptions';
+mkdirSync(subsDir, { recursive: true });
 const payload = JSON.stringify({ ts: Date.now() });
 const expired = [];
 

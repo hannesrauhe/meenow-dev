@@ -30,7 +30,7 @@ jobs:
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
           VAPID_SUBJECT: mailto:2qhhabkrd@mozmail.com
-          SUBS_DIR: push-subs/subscriptions
+          SUBS_DIR: push-subs/subscriptions/dev
         run: node scripts/send-tick.mjs
 
       - name: Commit expired subscription removals
@@ -38,5 +38,5 @@ jobs:
           cd push-subs
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
-          git add subscriptions/
+          git add subscriptions/dev/
           git diff --staged --quiet || (git commit -m "Remove expired subscriptions" && git push)
