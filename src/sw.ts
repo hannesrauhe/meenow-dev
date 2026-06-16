@@ -7,16 +7,20 @@ declare const self: ServiceWorkerGlobalScope & {
 
 precacheAndRoute(self.__WB_MANIFEST);
 
+// How long after a trigger fires the SW will still show a notification.
+// Matches the GitHub Actions cron interval so every tick lands in at most one window.
+const NOTIFICATION_WINDOW_MS = 30 * 60 * 1000;
+
+// In-memory dedup: prevents showing the same notification twice within a session.
+// Resets if the SW is terminated and restarted — acceptable because the window
+// will usually have expired before the next push arrives.
 let lastNotifiedTriggerMs = 0;
 
 self.addEventListener('push', event => {
   const now = Date.now();
   const triggerMs = getLastTriggerTime().getTime();
-  const windowMs = 30 * 60 * 1000;
 
-  // Only show if within the 30-min window after the trigger fires
-  if (now < triggerMs || now > triggerMs + windowMs) return;
-  // Deduplicate: only one notification per trigger period
+  if (now < triggerMs || now > triggerMs + NOTIFICATION_WINDOW_MS) return;
   if (lastNotifiedTriggerMs >= triggerMs) return;
   lastNotifiedTriggerMs = triggerMs;
 
@@ -25,7 +29,7 @@ self.addEventListener('push', event => {
       body: 'Time for your daily meenow!',
       icon: '/icon.svg',
       tag: 'meenow-daily',
-    })
+    }).catch(err => console.error('[sw] showNotification failed', err))
   );
 });
 

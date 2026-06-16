@@ -1,11 +1,13 @@
+import { getPushSubFilename, setPushSubFilename } from './state';
+
 // These are injected at build time from GitHub repo secrets (VITE_* prefix).
 // Each deployed instance (dev.meenow.de, meenow.de) has its own secret values,
 // which keeps their VAPID keys and subscription sets isolated.
-const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY as string;
-const PUSH_RELAY_TOKEN = import.meta.env.VITE_PUSH_RELAY_TOKEN as string;
+const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined;
+const PUSH_RELAY_TOKEN = import.meta.env.VITE_PUSH_RELAY_TOKEN as string | undefined;
 const PUSH_RELAY_REPO = 'meenow-de/meenow-push';
 // e.g. 'subscriptions/dev' or 'subscriptions/prod'
-const PUSH_SUBS_PATH = import.meta.env.VITE_PUSH_SUBS_PATH as string;
+const PUSH_SUBS_PATH = import.meta.env.VITE_PUSH_SUBS_PATH as string | undefined;
 
 function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   const padding = '='.repeat((4 - (base64.length % 4)) % 4);
@@ -27,17 +29,33 @@ export async function isNotificationsEnabled(): Promise<boolean> {
 }
 
 export async function enableNotifications(): Promise<'granted' | 'denied' | 'error'> {
+  if (!VAPID_PUBLIC_KEY || !PUSH_RELAY_TOKEN || !PUSH_SUBS_PATH) {
+    console.error('[notifications] Push config env vars not set');
+    return 'error';
+  }
+
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') return 'denied';
 
   const reg = await navigator.serviceWorker.ready;
+
   let sub = await reg.pushManager.getSubscription();
   if (!sub) {
-    sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-    });
+    try {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+    } catch (err) {
+      console.error('[notifications] pushManager.subscribe failed', err);
+      return 'error';
+    }
   }
+
+  // Reuse the filename written on the previous registration to avoid accumulating
+  // duplicate files in the subscriptions repo for the same browser.
+  const existingFile = getPushSubFilename();
+  if (existingFile) return 'granted';
 
   const filename = `${PUSH_SUBS_PATH}/${crypto.randomUUID()}.json`;
   const content = btoa(JSON.stringify(sub.toJSON()));
@@ -52,5 +70,12 @@ export async function enableNotifications(): Promise<'granted' | 'denied' | 'err
       body: JSON.stringify({ message: 'Add subscription', content }),
     }
   );
-  return res.ok ? 'granted' : 'error';
+
+  if (!res.ok) {
+    console.error('[notifications] Failed to register subscription', res.status, await res.text());
+    return 'error';
+  }
+
+  setPushSubFilename(filename);
+  return 'granted';
 }

@@ -1,4 +1,5 @@
 import { isPushSupported, isNotificationsEnabled, enableNotifications } from '../notifications';
+import { isNotificationNudgeDismissed, dismissNotificationNudge } from '../state';
 
 export function removeNotificationNudge(): void {
   document.getElementById('notification-nudge')?.remove();
@@ -6,6 +7,7 @@ export function removeNotificationNudge(): void {
 
 export async function renderNotificationNudge(): Promise<void> {
   if (!isPushSupported() || Notification.permission === 'denied') return;
+  if (isNotificationNudgeDismissed()) return;
   if (await isNotificationsEnabled()) return;
   if (document.getElementById('notification-nudge')) return;
 
@@ -14,7 +16,7 @@ export async function renderNotificationNudge(): Promise<void> {
   banner.className = [
     'fixed bottom-0 left-0 right-0 z-50',
     'bg-ink text-cream',
-    'px-5 pt-4 safe-area-bottom',
+    'px-5 pt-4 pb-4 safe-area-bottom',
     'flex items-start gap-4',
     'border-t border-white/10',
   ].join(' ');
@@ -34,16 +36,22 @@ export async function renderNotificationNudge(): Promise<void> {
     const btn = banner.querySelector('#btn-enable-notif') as HTMLButtonElement;
     btn.textContent = '…';
     btn.disabled = true;
-    const result = await enableNotifications();
-    if (result === 'granted' || result === 'denied') {
-      banner.remove();
-    } else {
+    try {
+      const result = await enableNotifications();
+      if (result === 'granted' || result === 'denied') {
+        banner.remove();
+      } else {
+        btn.textContent = 'Retry';
+        btn.disabled = false;
+      }
+    } catch {
       btn.textContent = 'Retry';
       btn.disabled = false;
     }
   });
 
   banner.querySelector('#btn-dismiss-notif')?.addEventListener('click', () => {
+    dismissNotificationNudge();
     banner.remove();
   });
 }

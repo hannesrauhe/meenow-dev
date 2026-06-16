@@ -8,8 +8,11 @@ on:
 jobs:
   send:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: .
 
       - uses: actions/checkout@v4
         with:
@@ -28,14 +31,15 @@ jobs:
       - name: Send tick
         env:
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
-          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
           VAPID_SUBJECT: mailto:2qhhabkrd@mozmail.com
+          # Sends to dev subscriptions only; prod workflow lives in meenow-de/meenow
           SUBS_DIR: push-subs/subscriptions/dev
         run: node scripts/send-tick.mjs
 
       - name: Commit expired subscription removals
+        working-directory: push-subs
         run: |
-          cd push-subs
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
           git add subscriptions/dev/

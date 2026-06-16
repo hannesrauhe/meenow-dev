@@ -1,14 +1,17 @@
 import webpush from 'web-push';
 import { readdirSync, readFileSync, rmSync, mkdirSync } from 'fs';
 
-webpush.setVapidDetails(
-  process.env.VAPID_SUBJECT,
-  process.env.VAPID_PUBLIC_KEY,
-  process.env.VAPID_PRIVATE_KEY
-);
+const { VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, SUBS_DIR } = process.env;
+if (!VAPID_SUBJECT || !VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+  console.error('Missing required VAPID env vars');
+  process.exit(1);
+}
 
-const subsDir = process.env.SUBS_DIR ?? 'subscriptions';
+webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+
+const subsDir = SUBS_DIR ?? 'subscriptions';
 mkdirSync(subsDir, { recursive: true });
+
 const payload = JSON.stringify({ ts: Date.now() });
 const expired = [];
 
@@ -18,7 +21,8 @@ for (const file of readdirSync(subsDir).filter(f => f.endsWith('.json'))) {
     await webpush.sendNotification(sub, payload, { TTL: 45 * 60 });
     console.log(`Sent to ${file}`);
   } catch (err) {
-    if (err.statusCode === 410 || err.statusCode === 404) {
+    // 404/410 = subscription expired or unregistered; 400 can also signal expiry on some push services
+    if (err.statusCode === 410 || err.statusCode === 404 || err.statusCode === 400) {
       rmSync(`${subsDir}/${file}`);
       expired.push(file);
     } else {

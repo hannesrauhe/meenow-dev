@@ -2,7 +2,8 @@ import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { execSync } from 'child_process';
 
-const GIT_HASH = execSync('git rev-parse --short HEAD').toString().trim();
+let GIT_HASH = 'unknown';
+try { GIT_HASH = execSync('git rev-parse --short HEAD').toString().trim(); } catch { /* no git */ }
 
 const REQUIRED_ENV = [
   'VITE_VAPID_PUBLIC_KEY',
@@ -11,7 +12,8 @@ const REQUIRED_ENV = [
 ] as const;
 
 export default defineConfig(({ command }) => {
-  if (command === 'build') {
+  // Only enforce push config in CI — local builds can omit it (push features degrade gracefully).
+  if (command === 'build' && process.env.CI === 'true') {
     const missing = REQUIRED_ENV.filter(key => !process.env[key]);
     if (missing.length > 0) {
       throw new Error(`Missing required environment variables:\n${missing.map(k => `  ${k}`).join('\n')}`);
