@@ -17,11 +17,14 @@ const NOTIFICATION_WINDOW_MS = 30 * 60 * 1000;
 let lastNotifiedTriggerMs = 0;
 
 self.addEventListener('push', event => {
+  const data: { ts?: number; force?: boolean } = event.data?.json() ?? {};
   const now = Date.now();
   const triggerMs = getLastTriggerTime().getTime();
 
-  if (now < triggerMs || now > triggerMs + NOTIFICATION_WINDOW_MS) return;
-  if (lastNotifiedTriggerMs >= triggerMs) return;
+  if (!data.force) {
+    if (now < triggerMs || now > triggerMs + NOTIFICATION_WINDOW_MS) return;
+    if (lastNotifiedTriggerMs >= triggerMs) return;
+  }
   lastNotifiedTriggerMs = triggerMs;
 
   event.waitUntil(

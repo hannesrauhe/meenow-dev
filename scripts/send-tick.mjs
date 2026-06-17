@@ -12,7 +12,7 @@ webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 const subsDir = SUBS_DIR ?? 'subscriptions';
 mkdirSync(subsDir, { recursive: true });
 
-const payload = JSON.stringify({ ts: Date.now() });
+const payload = JSON.stringify({ ts: Date.now(), ...(process.env.FORCE === 'true' && { force: true }) });
 const expired = [];
 
 for (const file of readdirSync(subsDir).filter(f => f.endsWith('.json'))) {
