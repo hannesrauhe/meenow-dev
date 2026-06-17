@@ -1,0 +1,187 @@
+import { CHEVRON_LEFT_ICON } from '../icons';
+import type { AuthState } from '../api/auth';
+import { fetchPostContext, postReply, type FeedPost, type MastodonReply } from '../api/pixelfed';
+import { formatRelativeTime } from '../timer';
+
+export function renderPostDetail(
+  post: FeedPost,
+  auth: AuthState,
+  onBack: () => void,
+): HTMLElement {
+  const root = document.createElement('div');
+  root.id = 'screen-post-detail';
+  root.className = 'min-h-dvh flex flex-col bg-cream';
+
+  // Header
+  const header = document.createElement('header');
+  header.className = 'sticky top-0 z-10 bg-cream/95 backdrop-blur-sm flex items-center gap-3 px-4 py-3 border-b border-ink/10';
+
+  const backBtn = document.createElement('button');
+  backBtn.className = 'flex items-center gap-1 text-sm text-gold font-medium w-8 h-8 -ml-1';
+  backBtn.setAttribute('aria-label', 'Back to feed');
+  backBtn.innerHTML = CHEVRON_LEFT_ICON;
+  backBtn.addEventListener('click', onBack);
+  header.appendChild(backBtn);
+
+  const title = document.createElement('h1');
+  title.className = 'text-base font-semibold text-ink';
+  title.textContent = 'Post';
+  header.appendChild(title);
+
+  root.appendChild(header);
+
+  // Scrollable content
+  const scrollArea = document.createElement('div');
+  scrollArea.className = 'flex-1 overflow-y-auto';
+
+  // Author row
+  const authorRow = document.createElement('div');
+  authorRow.className = 'flex items-center gap-3 px-4 py-3';
+
+  const avatar = document.createElement('img');
+  avatar.src = post.account.avatarUrl;
+  avatar.className = 'w-9 h-9 rounded-full object-cover bg-gold-light shrink-0';
+  avatar.alt = '';
+  authorRow.appendChild(avatar);
+
+  const info = document.createElement('div');
+  info.className = 'flex-1 min-w-0';
+
+  const nameEl = document.createElement('p');
+  nameEl.className = 'text-sm font-medium text-ink truncate';
+  nameEl.textContent = post.account.displayName;
+  info.appendChild(nameEl);
+
+  const metaEl = document.createElement('p');
+  metaEl.className = 'text-xs text-ink/40';
+  metaEl.textContent = `@${post.account.username} · ${formatRelativeTime(post.createdAt)}`;
+  info.appendChild(metaEl);
+
+  authorRow.appendChild(info);
+  scrollArea.appendChild(authorRow);
+
+  // Full-width image
+  const photo = document.createElement('img');
+  photo.src = post.compositeUrl;
+  photo.className = 'w-full block';
+  photo.alt = 'meenow photo';
+  scrollArea.appendChild(photo);
+
+  // Comments section
+  const commentsSection = document.createElement('div');
+  commentsSection.id = 'comments-section';
+  commentsSection.className = 'px-4 py-2';
+  scrollArea.appendChild(commentsSection);
+
+  root.appendChild(scrollArea);
+
+  // Reply bar
+  const replyBar = document.createElement('div');
+  replyBar.className = 'sticky bottom-0 bg-cream border-t border-ink/10 px-4 py-3 flex gap-2';
+
+  const replyInput = document.createElement('textarea');
+  replyInput.id = 'reply-input';
+  replyInput.className = 'flex-1 resize-none rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm text-ink placeholder:text-ink/35 focus:outline-none focus:border-gold/60 min-h-[40px] max-h-32';
+  replyInput.placeholder = 'Add a reply…';
+  replyInput.rows = 1;
+  replyBar.appendChild(replyInput);
+
+  const sendBtn = document.createElement('button');
+  sendBtn.id = 'btn-send';
+  sendBtn.className = 'self-end px-4 py-2 rounded-xl bg-gold text-white text-sm font-semibold disabled:opacity-40 transition-opacity';
+  sendBtn.textContent = 'Send';
+  sendBtn.disabled = true;
+  replyBar.appendChild(sendBtn);
+
+  replyInput.addEventListener('input', () => {
+    sendBtn.disabled = replyInput.value.trim() === '';
+  });
+
+  sendBtn.addEventListener('click', () => {
+    const text = replyInput.value.trim();
+    if (!text) return;
+    replyInput.disabled = true;
+    sendBtn.disabled = true;
+    sendBtn.textContent = '…';
+    postReply(auth, post.id, text)
+      .then(() => {
+        replyInput.value = '';
+        replyInput.disabled = false;
+        sendBtn.textContent = 'Send';
+        sendBtn.disabled = true;
+        loadComments(commentsSection, auth, post.id);
+      })
+      .catch(() => {
+        replyInput.disabled = false;
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Retry';
+      });
+  });
+
+  root.appendChild(replyBar);
+
+  loadComments(commentsSection, auth, post.id);
+
+  return root;
+}
+
+async function loadComments(section: HTMLElement, auth: AuthState, statusId: string): Promise<void> {
+  section.innerHTML = `
+    <div class="flex items-center justify-center py-8">
+      <div class="w-6 h-6 border-[3px] border-gold/30 border-t-gold rounded-full animate-spin"></div>
+    </div>
+  `;
+
+  let context;
+  try {
+    context = await fetchPostContext(auth, statusId);
+  } catch {
+    section.innerHTML = `
+      <div class="flex flex-col items-center py-8 gap-3 text-center">
+        <p class="text-sm text-ink/50">Could not load replies.</p>
+        <button id="btn-comments-retry" class="text-sm text-gold underline underline-offset-2">Retry</button>
+      </div>
+    `;
+    section.querySelector('#btn-comments-retry')?.addEventListener('click', () => loadComments(section, auth, statusId));
+    return;
+  }
+
+  section.innerHTML = '';
+
+  if (context.descendants.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'text-sm text-ink/40 text-center py-8';
+    empty.textContent = 'No replies yet.';
+    section.appendChild(empty);
+    return;
+  }
+
+  context.descendants.forEach(reply => section.appendChild(makeReplyRow(reply)));
+}
+
+function makeReplyRow(reply: MastodonReply): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'flex gap-3 py-3 border-b border-ink/8';
+
+  const avatar = document.createElement('img');
+  avatar.src = reply.account.avatar;
+  avatar.className = 'w-8 h-8 rounded-full object-cover bg-gold-light shrink-0 mt-0.5';
+  avatar.alt = '';
+  row.appendChild(avatar);
+
+  const body = document.createElement('div');
+  body.className = 'flex-1 min-w-0';
+
+  const meta = document.createElement('p');
+  meta.className = 'text-xs text-ink/40 mb-1';
+  meta.textContent = `@${reply.account.username} · ${formatRelativeTime(new Date(reply.created_at))}`;
+  body.appendChild(meta);
+
+  const content = document.createElement('div');
+  content.className = 'text-sm text-ink';
+  content.innerHTML = reply.content;
+  body.appendChild(content);
+
+  row.appendChild(body);
+  return row;
+}

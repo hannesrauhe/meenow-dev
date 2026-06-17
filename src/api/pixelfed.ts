@@ -46,6 +46,22 @@ export interface FeedPost {
   allMediaUrls: string[];
 }
 
+export interface MastodonReply {
+  id: string;
+  created_at: string;
+  account: {
+    display_name: string;
+    username: string;
+    avatar: string;
+  };
+  content: string;
+}
+
+export interface PostContext {
+  ancestors: MastodonReply[];
+  descendants: MastodonReply[];
+}
+
 // --- Upload / post ---
 
 async function uploadOne(auth: AuthState, blob: Blob, description: string): Promise<string> {
@@ -186,4 +202,28 @@ export async function fetchTodayPostCount(auth: AuthState): Promise<number> {
   } catch {
     return 0;
   }
+}
+
+export async function fetchPostContext(auth: AuthState, statusId: string): Promise<PostContext> {
+  const res = await fetch(`https://${auth.instance}/api/v1/statuses/${statusId}/context`, {
+    headers: { Authorization: `Bearer ${auth.accessToken}` },
+  });
+  if (!res.ok) throw new Error(`Context fetch failed (${res.status})`);
+  return res.json() as Promise<PostContext>;
+}
+
+export async function postReply(auth: AuthState, inReplyToId: string, content: string): Promise<void> {
+  const res = await fetch(`https://${auth.instance}/api/v1/statuses`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${auth.accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      status: content,
+      in_reply_to_id: inReplyToId,
+      visibility: 'private',
+    }),
+  });
+  if (!res.ok) throw new Error(`Reply failed (${res.status})`);
 }

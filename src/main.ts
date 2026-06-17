@@ -8,11 +8,13 @@ import { fetchTodayPostCount } from './api/pixelfed';
 import { renderCapture } from './screens/capture';
 import { renderFeed } from './screens/feed';
 import { renderLogin } from './screens/login';
+import { renderPostDetail } from './screens/postDetail';
+import type { FeedPost } from './api/pixelfed';
 import { renderInstallNudge, removeInstallNudge } from './components/installNudge';
 import { renderNotificationNudge, removeNotificationNudge } from './components/notificationNudge';
 
 const app = document.getElementById('app')!;
-type Screen = AppState | 'login' | 'capturing';
+type Screen = AppState | 'login' | 'capturing' | 'post_detail';
 let activeScreen: Screen | null = null;
 let tickId: number | null = null;
 
@@ -45,6 +47,16 @@ function mountCapture(): void {
   app.appendChild(renderCapture(periodPostCount, onPosted, () => { activeScreen = null; }));
 }
 
+function mountPostDetail(post: FeedPost): void {
+  const auth = getAuthState();
+  if (!auth) return;
+  activeScreen = 'post_detail';
+  app.innerHTML = '';
+  removeInstallNudge();
+  removeNotificationNudge();
+  app.appendChild(renderPostDetail(post, auth, () => { activeScreen = null; }));
+}
+
 function mount(screen: AppState | 'login'): void {
   app.innerHTML = '';
   if (screen === 'login') {
@@ -56,7 +68,7 @@ function mount(screen: AppState | 'login'): void {
     void renderNotificationNudge();
     return;
   } else {
-    app.appendChild(renderFeed(mountCapture, periodPostCount));
+    app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail));
     void renderNotificationNudge();
   }
   renderInstallNudge();
@@ -64,6 +76,7 @@ function mount(screen: AppState | 'login'): void {
 
 function tick(): void {
   if (activeScreen === 'capturing') return;
+  if (activeScreen === 'post_detail') return;
 
   // Detect when a new trigger period starts while the app is open (e.g. trigger
   // fires at 3 PM while the user is on the countdown after posting twice).
