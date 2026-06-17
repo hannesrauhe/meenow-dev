@@ -9,9 +9,11 @@ A minimal PWA that prompts users once a day to take a dual-camera photo (back + 
 ```
 npm install
 npm run dev      # Vite dev server on localhost:5173
-npm run build    # production build to dist/
+npm run build    # production build to dist/ (push config env vars not required locally)
 npx tsc --noEmit # type-check without building
 ```
+
+Push notification env vars (`VITE_VAPID_PUBLIC_KEY`, `VITE_PUSH_RELAY_TOKEN`, `VITE_PUSH_SUBS_PATH`) are only enforced during CI builds (`CI=true`). Local builds succeed without them; push features degrade gracefully.
 
 ## Tech stack
 
@@ -48,4 +50,6 @@ To ship to production: open a PR from `hannesrauhe/meenow:main` into `meenow-de/
 - **`activeScreen`** in `main.ts` tracks what is currently mounted. The special `'capturing'` value pauses the tick loop during the second-post flow so it does not unmount the in-progress capture screen.
 - **Screen mounting** is done by `mount()` and `mountCapture()` in `main.ts`. Screens must not manipulate `#app` directly — use the `onRequestCapture` / `onDone` callbacks instead.
 - **Auth** is read from localStorage via `getAuthState()`. The app auto-registers itself as an OAuth client on first login per Pixelfed instance, so each domain (`dev.meenow.de`, `meenow.de`) registers independently.
-- **Service worker** caches aggressively in production. On the dev domain, users may need a hard refresh after a new deployment.
+- **Service worker** caches aggressively in production. On the dev domain, users may need a hard refresh after a new deployment. The service worker is a custom `injectManifest` file (`src/sw.ts`) — excluded from the main `tsconfig.json` because it requires webworker types.
+- **Push notifications** use standard Web Push (VAPID). The server side lives in `scripts/send-tick.mjs` + `.github/workflows/send-tick.yml`: a cron job runs every 30 minutes, checks out `meenow-de/meenow-push` (a separate private-or-public storage repo), sends a generic `{ts}` tick to every subscription file, and deletes expired ones (410/404). The service worker receives the tick and only shows a notification if `Date.now()` falls within 30 minutes of `getLastTriggerTime()` — all scheduling logic stays client-side. Each deployed instance uses its own VAPID key pair and subscription subdirectory (`subscriptions/dev` vs `subscriptions/prod`) so dev and prod are fully isolated.
+- **localStorage keys** follow the `meenow:*` namespace (see `src/state.ts`): `meenow:install-dismiss`, `meenow:notif-dismiss`, `meenow:push-sub-file`. The push-sub-file key stores the subscription filename written to the relay repo, preventing duplicate registrations from the same device.
