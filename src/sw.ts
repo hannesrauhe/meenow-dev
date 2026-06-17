@@ -30,7 +30,8 @@ self.addEventListener('push', event => {
   event.waitUntil(
     self.registration.showNotification('meenow', {
       body: 'Time for your daily meenow!',
-      icon: '/icon.svg',
+      icon: '/icon-192.png',
+      badge: '/badge-96.png',
       tag: 'meenow-daily',
     }).catch(err => console.error('[sw] showNotification failed', err))
   );

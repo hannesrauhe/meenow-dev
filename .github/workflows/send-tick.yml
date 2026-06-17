@@ -10,17 +10,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: .
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: meenow-de/meenow-push
           token: ${{ secrets.PUSH_SUBS_TOKEN }}
           path: push-subs
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '24'
 
