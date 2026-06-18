@@ -1,6 +1,7 @@
 import type { AuthState } from './auth';
 import { patchAccountId } from './auth';
 import { getLastTriggerTime } from '../timer';
+import { MAX_POSTS_PER_TRIGGER } from '../state';
 
 // --- Mastodon/Pixelfed API types ---
 
@@ -213,13 +214,24 @@ function toFeedPost(s: MastodonStatus): FeedPost {
 export async function fetchMeenowFeed(auth: AuthState): Promise<FeedPost[]> {
   const cutoff = getLastTriggerTime().getTime();
   const statuses = await fetchHomeTimeline(auth);
-  return statuses
+  const sorted = statuses
     .filter(s =>
       new Date(s.created_at).getTime() >= cutoff &&
       s.media_attachments.length > 0 &&
       hasMeenowTag(s)
     )
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  // Cap each account to MAX_POSTS_PER_TRIGGER newest posts to prevent bypassing
+  // the limit by posting directly on Pixelfed with the tag.
+  const seenCount = new Map<string, number>();
+  return sorted
+    .filter(s => {
+      const count = seenCount.get(s.account.id) ?? 0;
+      if (count >= MAX_POSTS_PER_TRIGGER) return false;
+      seenCount.set(s.account.id, count + 1);
+      return true;
+    })
     .map(toFeedPost);
 }
 
