@@ -159,33 +159,19 @@ function toFeedPost(s: MastodonStatus): FeedPost {
 
 export async function fetchMeenowFeed(auth: AuthState): Promise<FeedPost[]> {
   const cutoff = getLastTriggerTime().getTime();
-  const accountId = await resolveAccountId(auth);
 
-  const [homeRes, ownRes] = await Promise.all([
-    fetch(`https://${auth.instance}/api/v1/timelines/home?limit=40`, {
-      headers: { Authorization: `Bearer ${auth.accessToken}` },
-    }),
-    accountId
-      ? fetch(`https://${auth.instance}/api/v1/accounts/${accountId}/statuses?limit=20&exclude_replies=true`, {
-          headers: { Authorization: `Bearer ${auth.accessToken}` },
-        })
-      : Promise.resolve(new Response('[]', { status: 200 })),
-  ]);
+  const homeRes = await fetch(`https://${auth.instance}/api/v1/timelines/home?limit=40`, {
+    headers: { Authorization: `Bearer ${auth.accessToken}` },
+  });
 
   const home: MastodonStatus[] = homeRes.ok ? await homeRes.json() as MastodonStatus[] : [];
-  const own: MastodonStatus[] = ownRes.ok ? await ownRes.json() as MastodonStatus[] : [];
 
-  const seen = new Set<string>();
-  return [...home, ...own]
-    .filter(s => {
-      if (seen.has(s.id)) return false;
-      seen.add(s.id);
-      return (
-        new Date(s.created_at).getTime() >= cutoff &&
-        s.media_attachments.length > 0 &&
-        hasMeenowTag(s)
-      );
-    })
+  return home
+    .filter(s =>
+      new Date(s.created_at).getTime() >= cutoff &&
+      s.media_attachments.length > 0 &&
+      hasMeenowTag(s)
+    )
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .map(toFeedPost);
 }
