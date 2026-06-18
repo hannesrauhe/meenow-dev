@@ -54,7 +54,20 @@ function mountPostDetail(post: FeedPost): void {
   app.innerHTML = '';
   removeInstallNudge();
   removeNotificationNudge();
-  app.appendChild(renderPostDetail(post, auth, () => { activeScreen = null; }));
+
+  // Push a history entry so the hardware back button fires popstate
+  // rather than navigating away from (or closing) the PWA.
+  history.pushState({ screen: 'post_detail' }, '');
+
+  const onPopState = () => { activeScreen = null; };
+  window.addEventListener('popstate', onPopState, { once: true });
+
+  app.appendChild(renderPostDetail(post, auth, () => {
+    // In-app back: remove listener first, then pop the entry we pushed.
+    window.removeEventListener('popstate', onPopState);
+    history.back();
+    activeScreen = null;
+  }));
 }
 
 function mount(screen: AppState | 'login'): void {
