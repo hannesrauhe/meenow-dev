@@ -222,16 +222,12 @@ async function loadComments(section: HTMLElement, auth: AuthState, statusId: str
   try {
     context = await fetchPostContext(auth, statusId);
   } catch {
-    section.innerHTML = `
-      <div class="flex flex-col items-center py-8 gap-3 text-center">
-        <p class="text-sm text-ink/50">Could not load replies.</p>
-        <button id="btn-comments-retry" class="text-sm text-gold underline underline-offset-2">Retry</button>
-      </div>
-    `;
-    section.querySelector('#btn-comments-retry')?.addEventListener('click', () => loadComments(section, auth, statusId));
+    if (!section.isConnected) return;
+    section.innerHTML = `<p class="text-sm text-ink/50 text-center py-8">Could not load replies.</p>`;
     return;
   }
 
+  if (!section.isConnected) return;
   section.innerHTML = '';
 
   if (context.descendants.length === 0) {

@@ -186,11 +186,24 @@ export async function fetchMeenowFeed(auth: AuthState): Promise<FeedPost[]> {
 }
 
 export async function fetchTodayPostCount(auth: AuthState): Promise<number> {
-  if (!auth.accountId) return 0;
+  let accountId = auth.accountId;
+  if (!accountId) {
+    try {
+      const meRes = await fetch(`https://${auth.instance}/api/v1/accounts/verify_credentials`, {
+        headers: { Authorization: `Bearer ${auth.accessToken}` },
+      });
+      if (meRes.ok) {
+        const { id } = await meRes.json() as { id: string };
+        accountId = id;
+        patchAccountId(auth.instance, id);
+      }
+    } catch { /* fall through to return 0 */ }
+  }
+  if (!accountId) return 0;
   const periodStart = getLastTriggerTime().getTime();
   try {
     const res = await fetch(
-      `https://${auth.instance}/api/v1/accounts/${auth.accountId}/statuses?limit=10&exclude_replies=true`,
+      `https://${auth.instance}/api/v1/accounts/${accountId}/statuses?limit=10&exclude_replies=true`,
       { headers: { Authorization: `Bearer ${auth.accessToken}` } },
     );
     if (!res.ok) return 0;
@@ -209,7 +222,8 @@ export async function fetchPostContext(auth: AuthState, statusId: string): Promi
     headers: { Authorization: `Bearer ${auth.accessToken}` },
   });
   if (!res.ok) throw new Error(`Context fetch failed (${res.status})`);
-  return res.json() as Promise<PostContext>;
+  const raw = await res.json() as { ancestors?: MastodonReply[]; descendants?: MastodonReply[] };
+  return { ancestors: raw.ancestors ?? [], descendants: raw.descendants ?? [] };
 }
 
 export async function postReply(auth: AuthState, inReplyToId: string, content: string): Promise<void> {

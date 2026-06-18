@@ -44,7 +44,18 @@ function mountCapture(): void {
   app.innerHTML = '';
   removeInstallNudge();
   removeNotificationNudge();
-  app.appendChild(renderCapture(periodPostCount, onPosted, () => { activeScreen = null; }));
+
+  history.pushState({ screen: 'capturing' }, '');
+
+  const onPopState = () => { activeScreen = null; tick(); };
+  window.addEventListener('popstate', onPopState, { once: true });
+
+  app.appendChild(renderCapture(periodPostCount, onPosted, () => {
+    window.removeEventListener('popstate', onPopState);
+    history.back();
+    activeScreen = null;
+    tick();
+  }));
 }
 
 function mountPostDetail(post: FeedPost): void {
@@ -55,19 +66,27 @@ function mountPostDetail(post: FeedPost): void {
   removeInstallNudge();
   removeNotificationNudge();
 
-  // Push a history entry so the hardware back button fires popstate
-  // rather than navigating away from (or closing) the PWA.
   history.pushState({ screen: 'post_detail' }, '');
 
-  const onPopState = () => { activeScreen = null; };
+  const onPopState = () => { activeScreen = null; tick(); };
   window.addEventListener('popstate', onPopState, { once: true });
 
-  app.appendChild(renderPostDetail(post, auth, () => {
-    // In-app back: remove listener first, then pop the entry we pushed.
+  let el: HTMLElement;
+  try {
+    el = renderPostDetail(post, auth, () => {
+      window.removeEventListener('popstate', onPopState);
+      history.back();
+      activeScreen = null;
+      tick();
+    });
+  } catch {
     window.removeEventListener('popstate', onPopState);
     history.back();
     activeScreen = null;
-  }));
+    return;
+  }
+
+  app.appendChild(el);
 }
 
 function mount(screen: AppState | 'login'): void {
