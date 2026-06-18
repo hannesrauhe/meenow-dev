@@ -53,3 +53,25 @@ To ship to production: open a PR from `hannesrauhe/meenow:main` into `meenow-de/
 - **Service worker** caches aggressively in production. On the dev domain, users may need a hard refresh after a new deployment. The service worker is a custom `injectManifest` file (`src/sw.ts`) — excluded from the main `tsconfig.json` because it requires webworker types.
 - **Push notifications** use standard Web Push (VAPID). The server side lives in `scripts/send-tick.mjs` + `.github/workflows/send-tick.yml`: a cron job runs every 30 minutes, checks out `meenow-de/meenow-push` (a separate private-or-public storage repo), sends a generic `{ts}` tick to every subscription file, and deletes expired ones (410/404). The service worker receives the tick and only shows a notification if `Date.now()` falls within 30 minutes of `getLastTriggerTime()` — all scheduling logic stays client-side. Each deployed instance uses its own VAPID key pair and subscription subdirectory (`subscriptions/dev` vs `subscriptions/prod`) so dev and prod are fully isolated.
 - **localStorage keys** follow the `meenow:*` namespace (see `src/state.ts`): `meenow:install-dismiss`, `meenow:notif-dismiss`, `meenow:push-sub-file`. The push-sub-file key stores the subscription filename written to the relay repo, preventing duplicate registrations from the same device.
+
+## Post annotations: caption and location
+
+The preview step of the capture screen offers two optional annotations before posting:
+
+- **Caption** — a free-text textarea. Text persists across retakes within the same session and is cleared after a successful post.
+- **Location** — a button that calls `navigator.geolocation.getCurrentPosition` and reverse-geocodes the result to city level via the [Nominatim](https://nominatim.openstreetmap.org) OpenStreetMap API (`zoom=10`, `Accept-Language: en`). The resolved city and country are shown on the button as a gold pill; tapping it again clears the selection.
+
+**Why plain text, not a dedicated field**: the Mastodon-compatible API (`POST /api/v1/statuses`) has no location field. The annotation is stored as plain text in the status body, ahead of the `#meenowApp` tag:
+
+```
+<caption>
+📍 <City, Country>
+
+#meenowApp
+```
+
+Any combination is valid (caption only, location only, both, or neither). The `#meenowApp` tag is always appended to keep feed filtering working.
+
+**Parsing back**: `parseStatusParts` in `src/api/pixelfed.ts` strips the `#meenowApp` anchor from the Mastodon HTML `content` field, then detects any line starting with `📍` as the location. It returns `{ caption, location }` (location without the emoji prefix) which are stored as separate fields on `FeedPost`.
+
+**Display**: caption appears as plain text below the photo; location appears as the same gold rounded-pill (`text-gold border border-gold/30 rounded-full`) used in the capture preview. Both are rendered in the feed card and in the post detail screen.

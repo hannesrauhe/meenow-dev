@@ -62,6 +62,24 @@ export function renderPostDetail(
 
   scrollArea.appendChild(makePhotoSwiper(post));
 
+  if (post.statusText || post.location) {
+    const meta = document.createElement('div');
+    meta.className = 'px-4 pt-3 pb-1 flex flex-col gap-2';
+    if (post.statusText) {
+      const textEl = document.createElement('p');
+      textEl.className = 'text-sm text-ink leading-relaxed whitespace-pre-line';
+      textEl.textContent = post.statusText;
+      meta.appendChild(textEl);
+    }
+    if (post.location) {
+      const pill = document.createElement('span');
+      pill.className = 'inline-block text-xs text-gold border border-gold/30 rounded-full px-3 py-1.5';
+      pill.textContent = `📍 ${post.location}`;
+      meta.appendChild(pill);
+    }
+    scrollArea.appendChild(meta);
+  }
+
   // Comments section
   const commentsSection = document.createElement('div');
   commentsSection.id = 'comments-section';

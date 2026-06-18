@@ -171,6 +171,8 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone?: 
   let frontBlob: Blob | null = null;
   let compositeBlob: Blob | null = null;
   let previewUrl: string | null = null;
+  let statusText = '';
+  let locationText = '';
 
   function show(step: Step, message = ''): void {
     stopAllStreams();
@@ -309,7 +311,65 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone?: 
     d.appendChild(imgWrapper);
 
     const bar = document.createElement('div');
-    bar.className = 'shrink-0 bg-cream px-6 py-5 safe-area-bottom flex gap-3';
+    bar.className = 'shrink-0 bg-cream px-4 pt-3 pb-5 safe-area-bottom flex flex-col gap-2.5';
+
+    const textarea = document.createElement('textarea');
+    textarea.placeholder = 'Add a message… (optional)';
+    textarea.className = 'w-full rounded-xl border border-ink/15 bg-white/60 px-3 py-2 text-sm text-ink placeholder:text-ink/30 resize-none focus:outline-none focus:ring-1 focus:ring-gold/50';
+    textarea.rows = 2;
+    textarea.value = statusText;
+    textarea.addEventListener('input', () => { statusText = textarea.value; });
+    bar.appendChild(textarea);
+
+    const locRow = document.createElement('div');
+    locRow.className = 'flex items-center';
+    const locBtn = document.createElement('button');
+    locBtn.type = 'button';
+
+    function renderLocBtn(): void {
+      if (locationText) {
+        locBtn.className = 'text-xs text-gold border border-gold/30 rounded-full px-3 py-1.5 max-w-full truncate';
+        locBtn.textContent = locationText;
+        locBtn.title = 'Tap to clear location';
+        locBtn.onclick = () => { locationText = ''; renderLocBtn(); };
+      } else {
+        locBtn.className = 'text-xs text-ink/40 hover:text-gold transition-colors border border-ink/15 rounded-full px-3 py-1.5';
+        locBtn.textContent = 'Add location';
+        locBtn.title = '';
+        locBtn.onclick = () => void doFetchLocation();
+      }
+    }
+
+    async function doFetchLocation(): Promise<void> {
+      locBtn.textContent = 'Getting location…';
+      locBtn.disabled = true;
+      locBtn.onclick = null;
+      try {
+        const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
+          navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10_000 })
+        );
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${pos.coords.latitude}&lon=${pos.coords.longitude}&zoom=10`,
+          { headers: { 'Accept-Language': 'en' } }
+        );
+        if (!res.ok) throw new Error('Geocoding failed');
+        const data = await res.json() as { address?: { city?: string; town?: string; village?: string; country?: string } };
+        const city = data.address?.city ?? data.address?.town ?? data.address?.village;
+        const country = data.address?.country;
+        locationText = `📍 ${[city, country].filter(Boolean).join(', ')}`;
+      } catch {
+        locationText = '';
+      }
+      locBtn.disabled = false;
+      renderLocBtn();
+    }
+
+    renderLocBtn();
+    locRow.appendChild(locBtn);
+    bar.appendChild(locRow);
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'flex gap-3';
 
     const retakeBtn = document.createElement('button');
     retakeBtn.className = 'flex-1 border border-ink/20 text-ink rounded-full py-3 text-sm font-medium';
@@ -318,14 +378,15 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone?: 
       backBlob = null; frontBlob = null; compositeBlob = null;
       show('start'); // show() revokes previewUrl
     });
-    bar.appendChild(retakeBtn);
+    btnRow.appendChild(retakeBtn);
 
     const postBtn = document.createElement('button');
     postBtn.className = 'flex-1 btn-primary';
     postBtn.textContent = 'Post';
     postBtn.addEventListener('click', () => upload()); // show('uploading') inside upload() revokes previewUrl
-    bar.appendChild(postBtn);
+    btnRow.appendChild(postBtn);
 
+    bar.appendChild(btnRow);
     d.appendChild(bar);
     return d;
   }
@@ -335,7 +396,10 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone?: 
     const auth = getAuthState();
     if (!auth) { show('error', 'Not logged in.'); return; }
     try {
-      await postMeenow(auth, compositeBlob!, backBlob!, frontBlob!);
+      const parts = [statusText.trim(), locationText.trim()].filter(Boolean);
+      await postMeenow(auth, compositeBlob!, backBlob!, frontBlob!, parts.join('\n') || undefined);
+      statusText = '';
+      locationText = '';
       onPosted();
       onDone?.();
     } catch (err) {

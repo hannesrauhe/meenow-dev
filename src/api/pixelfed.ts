@@ -28,6 +28,7 @@ interface MastodonStatus {
   url: string;
   created_at: string;
   replies_count: number;
+  content: string;
   account: MastodonAccount;
   media_attachments: MastodonMediaAttachment[];
   tags: MastodonTag[];
@@ -40,6 +41,8 @@ export interface FeedPost {
   url: string;
   createdAt: Date;
   replyCount: number;
+  statusText: string;
+  location: string;
   account: {
     displayName: string;
     username: string;
@@ -99,6 +102,7 @@ export async function postMeenow(
   composite: Blob,
   backPhoto: Blob,
   frontPhoto: Blob,
+  statusText?: string,
 ): Promise<string> {
   // Upload composite first so it gets the lowest attachment ID and appears first in the gallery
   const compositeId = await uploadOne(auth, composite, 'meenow — daily photo');
@@ -107,6 +111,7 @@ export async function postMeenow(
     uploadOne(auth, frontPhoto, 'meenow — selfie'),
   ]);
 
+  const status = statusText ? `${statusText}\n\n#meenowApp` : '#meenowApp';
   const res = await fetch(`https://${auth.instance}/api/v1/statuses`, {
     method: 'POST',
     headers: {
@@ -114,7 +119,7 @@ export async function postMeenow(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      status: '#meenowApp',
+      status,
       media_ids: [compositeId, backId, frontId],
       visibility: 'private',
     }),
@@ -195,12 +200,35 @@ function hasMeenowTag(s: MastodonStatus): boolean {
   return s.tags.some(t => t.name.toLowerCase() === 'meenowapp');
 }
 
+function parseStatusParts(htmlContent: string): { caption: string; location: string } {
+  const div = document.createElement('div');
+  div.innerHTML = htmlContent;
+  div.querySelectorAll('a').forEach(a => {
+    if ((a.textContent ?? '').replace(/[^a-z]/gi, '').toLowerCase() === 'meenowapp') {
+      a.remove();
+    }
+  });
+  div.querySelectorAll('p').forEach(p => {
+    p.prepend(document.createTextNode('\n'));
+  });
+  const full = (div.textContent ?? '').replace(/\n{3,}/g, '\n\n').trim();
+  const lines = full.split('\n');
+  const locIdx = lines.findIndex(l => l.startsWith('📍'));
+  if (locIdx === -1) return { caption: full, location: '' };
+  const location = lines[locIdx].replace(/^📍\s*/, '').trim();
+  lines.splice(locIdx, 1);
+  return { caption: lines.join('\n').trim(), location };
+}
+
 function toFeedPost(s: MastodonStatus): FeedPost {
+  const { caption, location } = parseStatusParts(s.content);
   return {
     id: s.id,
     url: s.url,
     createdAt: new Date(s.created_at),
     replyCount: s.replies_count,
+    statusText: caption,
+    location,
     account: {
       displayName: s.account.display_name || s.account.username,
       username: s.account.username,
