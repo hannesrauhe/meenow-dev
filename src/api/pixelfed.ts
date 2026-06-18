@@ -117,26 +117,49 @@ export async function postMeenow(
     }),
   });
   if (!res.ok) throw new Error(`Post failed (${res.status})`);
-  const status = await res.json() as { url: string };
-  // Invalidate so the feed picks up the new post on next render
-  _homeCache = null;
-  return status.url;
+  const statusData = await res.json() as MastodonStatus;
+  // Prepend the new post so the feed shows it immediately without a re-fetch.
+  // newestId advances so the next incremental fetch uses it as since_id.
+  if (_homeCache) {
+    _homeCache.statuses = [statusData, ..._homeCache.statuses];
+    if (statusData.id > _homeCache.newestId) _homeCache.newestId = statusData.id;
+  }
+  return statusData.url;
 }
 
 // --- Feed ---
 
-// Short-lived cache for the home timeline. fetchTodayPostCount (called from init())
-// and fetchMeenowFeed (called when the feed renders) both need this data; the cache
-// lets them share one network request per page load.
-let _homeCache: { ts: number; data: Promise<MastodonStatus[]> } | null = null;
+// Session-level home timeline cache. The first call does a full fetch; subsequent
+// calls use since_id so only new posts are transferred. _homePending deduplicates
+// concurrent callers (fetchTodayPostCount and fetchMeenowFeed both run on page load).
+interface HomeCache { statuses: MastodonStatus[]; newestId: string }
+let _homeCache: HomeCache | null = null;
+let _homePending: Promise<MastodonStatus[]> | null = null;
 
 function fetchHomeTimeline(auth: AuthState): Promise<MastodonStatus[]> {
-  if (_homeCache && Date.now() - _homeCache.ts < 30_000) return _homeCache.data;
-  const p = fetch(`https://${auth.instance}/api/v1/timelines/home?limit=40`, {
-    headers: { Authorization: `Bearer ${auth.accessToken}` },
-  }).then(r => (r.ok ? (r.json() as Promise<MastodonStatus[]>) : Promise.resolve([])));
-  _homeCache = { ts: Date.now(), data: p };
-  return p;
+  if (_homePending) return _homePending;
+
+  const url = _homeCache?.newestId
+    ? `https://${auth.instance}/api/v1/timelines/home?limit=40&since_id=${_homeCache.newestId}`
+    : `https://${auth.instance}/api/v1/timelines/home?limit=40`;
+
+  _homePending = fetch(url, { headers: { Authorization: `Bearer ${auth.accessToken}` } })
+    .then(r => (r.ok ? (r.json() as Promise<MastodonStatus[]>) : Promise.resolve([])))
+    .then(incoming => {
+      if (_homeCache) {
+        if (incoming.length > 0) {
+          _homeCache.statuses = [...incoming, ..._homeCache.statuses];
+          _homeCache.newestId = incoming[0].id;
+        }
+      } else {
+        _homeCache = { statuses: incoming, newestId: incoming[0]?.id ?? '' };
+      }
+      _homePending = null;
+      return _homeCache.statuses;
+    })
+    .catch(err => { _homePending = null; throw err; });
+
+  return _homePending;
 }
 
 async function resolveAccountId(auth: AuthState): Promise<string | undefined> {
