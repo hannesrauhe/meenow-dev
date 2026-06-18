@@ -126,8 +126,9 @@ function makePhotoSwiper(post: FeedPost): HTMLElement {
   if (urls.length <= 1) {
     const img = document.createElement('img');
     img.src = post.compositeUrl;
-    img.className = 'w-full block';
+    img.className = 'w-full block cursor-zoom-in';
     img.alt = 'meenow photo';
+    img.addEventListener('click', () => openLightbox([post.compositeUrl], 0));
     return img;
   }
 
@@ -138,7 +139,7 @@ function makePhotoSwiper(post: FeedPost): HTMLElement {
   let currentIndex = 0;
 
   const wrapper = document.createElement('div');
-  wrapper.className = 'relative overflow-hidden bg-black select-none';
+  wrapper.className = 'relative overflow-hidden bg-black select-none cursor-zoom-in';
 
   const photo = document.createElement('img');
   photo.src = urls[0];
@@ -208,7 +209,155 @@ function makePhotoSwiper(post: FeedPost): HTMLElement {
     }
   }, { passive: true });
 
+  wrapper.addEventListener('click', () => openLightbox(urls, currentIndex));
+
   return wrapper;
+}
+
+function openLightbox(urls: string[], startIndex: number): void {
+  urls.forEach(url => { const i = new Image(); i.src = url; });
+
+  let idx = startIndex;
+  let scale = 1;
+  let panX = 0;
+  let panY = 0;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 z-[100] bg-black flex items-center justify-center';
+  overlay.style.touchAction = 'none';
+
+  const img = document.createElement('img');
+  img.className = 'max-w-full max-h-dvh object-contain select-none';
+  img.style.willChange = 'transform';
+  img.draggable = false;
+  img.alt = '';
+  img.src = urls[idx];
+  overlay.appendChild(img);
+
+  const applyTransform = (): void => {
+    img.style.transform = scale === 1
+      ? ''
+      : `scale(${scale}) translate(${panX / scale}px, ${panY / scale}px)`;
+  };
+
+  const dotClass = (active: boolean): string =>
+    `w-1.5 h-1.5 rounded-full ${active ? 'bg-white' : 'bg-white/40'}`;
+  const dots: HTMLElement[] = [];
+
+  const setImage = (i: number): void => {
+    idx = i;
+    img.src = urls[i];
+    scale = 1; panX = 0; panY = 0;
+    img.style.transform = '';
+    dots.forEach((d, j) => { d.className = dotClass(j === i); });
+  };
+
+  const close = (): void => { overlay.remove(); };
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'absolute top-4 right-4 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-black/50 text-white text-2xl leading-none';
+  closeBtn.textContent = '×';
+  closeBtn.setAttribute('aria-label', 'Close');
+  closeBtn.addEventListener('click', close);
+  overlay.appendChild(closeBtn);
+
+  if (urls.length > 1) {
+    const dotsBar = document.createElement('div');
+    dotsBar.className = 'absolute bottom-4 left-0 right-0 flex justify-center gap-1.5 pointer-events-none';
+    urls.forEach((_, i) => {
+      const dot = document.createElement('div');
+      dot.className = dotClass(i === idx);
+      dotsBar.appendChild(dot);
+      dots.push(dot);
+    });
+    overlay.appendChild(dotsBar);
+  }
+
+  // Touch handling — single touch: tap=close, drag=pan (when zoomed), swipe=navigate (when not zoomed)
+  //                  two touches: pinch to zoom
+  let startTouchX = 0;
+  let startTouchY = 0;
+  let startPanX = 0;
+  let startPanY = 0;
+  let startScale = 1;
+  let initialPinchDist = 0;
+  let pinchActive = false;
+  let axis: 'h' | 'v' | null = null;
+  let isTap = true;
+
+  overlay.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (e.touches.length === 2) {
+      pinchActive = true;
+      isTap = false;
+      startScale = scale;
+      startPanX = panX;
+      startPanY = panY;
+      initialPinchDist = Math.hypot(
+        e.touches[1].clientX - e.touches[0].clientX,
+        e.touches[1].clientY - e.touches[0].clientY,
+      );
+    } else if (e.touches.length === 1) {
+      pinchActive = false;
+      startTouchX = e.touches[0].clientX;
+      startTouchY = e.touches[0].clientY;
+      startPanX = panX;
+      startPanY = panY;
+      axis = null;
+      isTap = true;
+    }
+  }, { passive: false });
+
+  overlay.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    if (pinchActive && e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[1].clientX - e.touches[0].clientX,
+        e.touches[1].clientY - e.touches[0].clientY,
+      );
+      scale = Math.min(5, Math.max(1, startScale * dist / initialPinchDist));
+      applyTransform();
+    } else if (!pinchActive && e.touches.length === 1) {
+      const dx = e.touches[0].clientX - startTouchX;
+      const dy = e.touches[0].clientY - startTouchY;
+      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) isTap = false;
+      if (scale > 1) {
+        panX = startPanX + dx;
+        panY = startPanY + dy;
+        applyTransform();
+      } else if (axis === null && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+        axis = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
+      }
+    }
+  }, { passive: false });
+
+  overlay.addEventListener('touchend', (e) => {
+    if (isTap) { close(); return; }
+    if (scale <= 1) { scale = 1; panX = 0; panY = 0; img.style.transform = ''; }
+    if (!pinchActive && scale <= 1 && axis === 'h' && e.changedTouches.length > 0) {
+      const dx = e.changedTouches[0].clientX - startTouchX;
+      if (Math.abs(dx) >= 40) {
+        const newIdx = dx < 0 ? idx + 1 : idx - 1;
+        if (newIdx >= 0 && newIdx < urls.length) setImage(newIdx);
+      }
+    }
+    if (e.touches.length < 2) pinchActive = false;
+  }, { passive: true });
+
+  // Keyboard: Escape closes, arrow keys navigate
+  const handleKey = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape') close();
+    else if (e.key === 'ArrowLeft' && idx > 0) setImage(idx - 1);
+    else if (e.key === 'ArrowRight' && idx < urls.length - 1) setImage(idx + 1);
+  };
+  document.addEventListener('keydown', handleKey);
+
+  const observer = new MutationObserver(() => {
+    if (!overlay.isConnected) { document.removeEventListener('keydown', handleKey); observer.disconnect(); }
+  });
+  observer.observe(document.body, { childList: true });
+
+  document.body.appendChild(overlay);
 }
 
 async function loadComments(section: HTMLElement, auth: AuthState, statusId: string): Promise<void> {
