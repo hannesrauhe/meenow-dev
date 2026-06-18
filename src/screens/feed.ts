@@ -12,13 +12,12 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
 
   const header = document.createElement('header');
   header.className = 'sticky top-0 z-10 bg-cream/95 backdrop-blur-sm flex items-center justify-between px-5 py-4 border-b border-ink/10';
-  const count = postCount;
-  const atQuota = count >= MAX_POSTS_PER_TRIGGER;
+  const atQuota = postCount >= MAX_POSTS_PER_TRIGGER;
   header.innerHTML = `
     <h1 class="text-xl font-semibold tracking-tight text-ink">meenow</h1>
     <div class="flex items-center gap-3">
       ${!atQuota ? `<button id="btn-post-again" class="text-sm font-semibold text-gold">+ Post</button>` : ''}
-      <span id="header-status" class="text-xs text-ink/40">${!atQuota ? `${count}/${MAX_POSTS_PER_TRIGGER} posted` : ''}</span>
+      <span id="header-status" class="text-xs text-ink/40">${!atQuota ? `${postCount}/${MAX_POSTS_PER_TRIGGER} posted` : ''}</span>
     </div>
   `;
 
@@ -62,16 +61,13 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
 
   el.appendChild(footer);
 
-  header.querySelector('#btn-post-again')?.addEventListener('click', () => {
-    onRequestCapture();
-  });
+  header.querySelector('#btn-post-again')?.addEventListener('click', onRequestCapture);
 
-  loadFeed(content, auth, postCount, onOpenPost);
+  if (auth) loadFeed(content, auth, postCount, onOpenPost);
   return el;
 }
 
-async function loadFeed(container: HTMLElement, auth: AuthState | null, postCount: number, onOpenPost: (post: FeedPost) => void): Promise<void> {
-  if (!auth) return;
+async function loadFeed(container: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void): Promise<void> {
 
   container.innerHTML = `
     <div class="flex items-center justify-center py-20">

@@ -94,16 +94,16 @@ function mount(screen: AppState | 'login'): void {
   if (screen === 'login') {
     removeNotificationNudge();
     app.appendChild(renderLogin());
+    renderInstallNudge();
   } else if (screen === 'awaiting_capture') {
     removeInstallNudge();
     app.appendChild(renderCapture(periodPostCount, onPosted, () => { activeScreen = null; }));
     void renderNotificationNudge();
-    return;
   } else {
     app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail));
     void renderNotificationNudge();
+    renderInstallNudge();
   }
-  renderInstallNudge();
 }
 
 function tick(): void {
