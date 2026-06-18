@@ -46,6 +46,22 @@ export interface FeedPost {
   allMediaUrls: string[];
 }
 
+export interface MastodonReply {
+  id: string;
+  created_at: string;
+  account: {
+    display_name: string;
+    username: string;
+    avatar: string;
+  };
+  content: string;
+}
+
+export interface PostContext {
+  ancestors: MastodonReply[];
+  descendants: MastodonReply[];
+}
+
 // --- Upload / post ---
 
 async function uploadOne(auth: AuthState, blob: Blob, description: string): Promise<string> {
@@ -107,6 +123,25 @@ export async function postMeenow(
 
 // --- Feed ---
 
+async function resolveAccountId(auth: AuthState): Promise<string | undefined> {
+  if (auth.accountId) return auth.accountId;
+  try {
+    const res = await fetch(`https://${auth.instance}/api/v1/accounts/verify_credentials`, {
+      headers: { Authorization: `Bearer ${auth.accessToken}` },
+    });
+    if (res.ok) {
+      const { id } = await res.json() as { id: string };
+      patchAccountId(auth.instance, id);
+      return id;
+    }
+  } catch { /* ignore */ }
+  return undefined;
+}
+
+function hasMeenowTag(s: MastodonStatus): boolean {
+  return s.tags.some(t => t.name.toLowerCase() === 'meenowapp');
+}
+
 function toFeedPost(s: MastodonStatus): FeedPost {
   return {
     id: s.id,
@@ -124,21 +159,7 @@ function toFeedPost(s: MastodonStatus): FeedPost {
 
 export async function fetchMeenowFeed(auth: AuthState): Promise<FeedPost[]> {
   const cutoff = getLastTriggerTime().getTime();
-
-  // Backfill accountId for users who logged in before it was stored
-  let accountId = auth.accountId;
-  if (!accountId) {
-    try {
-      const meRes = await fetch(`https://${auth.instance}/api/v1/accounts/verify_credentials`, {
-        headers: { Authorization: `Bearer ${auth.accessToken}` },
-      });
-      if (meRes.ok) {
-        const { id } = await meRes.json() as { id: string };
-        accountId = id;
-        patchAccountId(auth.instance, id);
-      }
-    } catch { /* proceed with home timeline only */ }
-  }
+  const accountId = await resolveAccountId(auth);
 
   const [homeRes, ownRes] = await Promise.all([
     fetch(`https://${auth.instance}/api/v1/timelines/home?limit=40`, {
@@ -162,7 +183,7 @@ export async function fetchMeenowFeed(auth: AuthState): Promise<FeedPost[]> {
       return (
         new Date(s.created_at).getTime() >= cutoff &&
         s.media_attachments.length > 0 &&
-        s.tags.some(t => t.name.toLowerCase() === 'meenowapp')
+        hasMeenowTag(s)
       );
     })
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
@@ -170,20 +191,46 @@ export async function fetchMeenowFeed(auth: AuthState): Promise<FeedPost[]> {
 }
 
 export async function fetchTodayPostCount(auth: AuthState): Promise<number> {
-  if (!auth.accountId) return 0;
+  const accountId = await resolveAccountId(auth);
+  if (!accountId) return 0;
   const periodStart = getLastTriggerTime().getTime();
   try {
     const res = await fetch(
-      `https://${auth.instance}/api/v1/accounts/${auth.accountId}/statuses?limit=10&exclude_replies=true`,
+      `https://${auth.instance}/api/v1/accounts/${accountId}/statuses?limit=10&exclude_replies=true`,
       { headers: { Authorization: `Bearer ${auth.accessToken}` } },
     );
     if (!res.ok) return 0;
     const statuses = await res.json() as MastodonStatus[];
     return statuses.filter(s =>
       new Date(s.created_at).getTime() >= periodStart &&
-      s.tags.some(t => t.name.toLowerCase() === 'meenowapp'),
+      hasMeenowTag(s)
     ).length;
   } catch {
     return 0;
   }
+}
+
+export async function fetchPostContext(auth: AuthState, statusId: string): Promise<PostContext> {
+  const res = await fetch(`https://${auth.instance}/api/v1/statuses/${statusId}/context`, {
+    headers: { Authorization: `Bearer ${auth.accessToken}` },
+  });
+  if (!res.ok) throw new Error(`Context fetch failed (${res.status})`);
+  const raw = await res.json() as { ancestors?: MastodonReply[]; descendants?: MastodonReply[] };
+  return { ancestors: raw.ancestors ?? [], descendants: raw.descendants ?? [] };
+}
+
+export async function postReply(auth: AuthState, inReplyToId: string, content: string): Promise<void> {
+  const res = await fetch(`https://${auth.instance}/api/v1/statuses`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${auth.accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      status: content,
+      in_reply_to_id: inReplyToId,
+      visibility: 'private',
+    }),
+  });
+  if (!res.ok) throw new Error(`Reply failed (${res.status})`);
 }

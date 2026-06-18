@@ -8,11 +8,13 @@ import { fetchTodayPostCount } from './api/pixelfed';
 import { renderCapture } from './screens/capture';
 import { renderFeed } from './screens/feed';
 import { renderLogin } from './screens/login';
+import { renderPostDetail } from './screens/postDetail';
+import type { FeedPost } from './api/pixelfed';
 import { renderInstallNudge, removeInstallNudge } from './components/installNudge';
 import { renderNotificationNudge, removeNotificationNudge } from './components/notificationNudge';
 
 const app = document.getElementById('app')!;
-type Screen = AppState | 'login' | 'capturing';
+type Screen = AppState | 'login' | 'capturing' | 'post_detail';
 let activeScreen: Screen | null = null;
 let tickId: number | null = null;
 
@@ -42,7 +44,49 @@ function mountCapture(): void {
   app.innerHTML = '';
   removeInstallNudge();
   removeNotificationNudge();
-  app.appendChild(renderCapture(periodPostCount, onPosted, () => { activeScreen = null; }));
+
+  history.pushState({ screen: 'capturing' }, '');
+
+  const onPopState = () => { activeScreen = null; tick(); };
+  window.addEventListener('popstate', onPopState, { once: true });
+
+  app.appendChild(renderCapture(periodPostCount, onPosted, () => {
+    window.removeEventListener('popstate', onPopState);
+    history.back();
+    activeScreen = null;
+    tick();
+  }));
+}
+
+function mountPostDetail(post: FeedPost): void {
+  const auth = getAuthState();
+  if (!auth) return;
+  activeScreen = 'post_detail';
+  app.innerHTML = '';
+  removeInstallNudge();
+  removeNotificationNudge();
+
+  history.pushState({ screen: 'post_detail' }, '');
+
+  const onPopState = () => { activeScreen = null; tick(); };
+  window.addEventListener('popstate', onPopState, { once: true });
+
+  let el: HTMLElement;
+  try {
+    el = renderPostDetail(post, auth, () => {
+      window.removeEventListener('popstate', onPopState);
+      history.back();
+      activeScreen = null;
+      tick();
+    });
+  } catch {
+    window.removeEventListener('popstate', onPopState);
+    history.back();
+    activeScreen = null;
+    return;
+  }
+
+  app.appendChild(el);
 }
 
 function mount(screen: AppState | 'login'): void {
@@ -50,20 +94,21 @@ function mount(screen: AppState | 'login'): void {
   if (screen === 'login') {
     removeNotificationNudge();
     app.appendChild(renderLogin());
+    renderInstallNudge();
   } else if (screen === 'awaiting_capture') {
     removeInstallNudge();
     app.appendChild(renderCapture(periodPostCount, onPosted, () => { activeScreen = null; }));
     void renderNotificationNudge();
-    return;
   } else {
-    app.appendChild(renderFeed(mountCapture, periodPostCount));
+    app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail));
     void renderNotificationNudge();
+    renderInstallNudge();
   }
-  renderInstallNudge();
 }
 
 function tick(): void {
   if (activeScreen === 'capturing') return;
+  if (activeScreen === 'post_detail') return;
 
   // Detect when a new trigger period starts while the app is open (e.g. trigger
   // fires at 3 PM while the user is on the countdown after posting twice).

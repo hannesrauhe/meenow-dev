@@ -2,9 +2,9 @@ import { SLEEPING_CAT } from '../icons';
 import { clearAuth, getAuthState, type AuthState } from '../api/auth';
 import { MAX_POSTS_PER_TRIGGER } from '../state';
 import { fetchMeenowFeed, type FeedPost } from '../api/pixelfed';
-import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime, formatCountdown } from '../timer';
+import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime, formatCountdown, formatRelativeTime } from '../timer';
 
-export function renderFeed(onRequestCapture: () => void, postCount: number): HTMLElement {
+export function renderFeed(onRequestCapture: () => void, postCount: number, onOpenPost: (post: FeedPost) => void): HTMLElement {
   const auth = getAuthState();
   const el = document.createElement('div');
   el.className = 'min-h-dvh flex flex-col bg-cream';
@@ -12,13 +12,12 @@ export function renderFeed(onRequestCapture: () => void, postCount: number): HTM
 
   const header = document.createElement('header');
   header.className = 'sticky top-0 z-10 bg-cream/95 backdrop-blur-sm flex items-center justify-between px-5 py-4 border-b border-ink/10';
-  const count = postCount;
-  const atQuota = count >= MAX_POSTS_PER_TRIGGER;
+  const atQuota = postCount >= MAX_POSTS_PER_TRIGGER;
   header.innerHTML = `
     <h1 class="text-xl font-semibold tracking-tight text-ink">meenow</h1>
     <div class="flex items-center gap-3">
       ${!atQuota ? `<button id="btn-post-again" class="text-sm font-semibold text-gold">+ Post</button>` : ''}
-      <span id="header-status" class="text-xs text-ink/40">${!atQuota ? `${count}/${MAX_POSTS_PER_TRIGGER} posted` : ''}</span>
+      <span id="header-status" class="text-xs text-ink/40">${!atQuota ? `${postCount}/${MAX_POSTS_PER_TRIGGER} posted` : ''}</span>
     </div>
   `;
 
@@ -62,24 +61,13 @@ export function renderFeed(onRequestCapture: () => void, postCount: number): HTM
 
   el.appendChild(footer);
 
-  header.querySelector('#btn-post-again')?.addEventListener('click', () => {
-    onRequestCapture();
-  });
+  header.querySelector('#btn-post-again')?.addEventListener('click', onRequestCapture);
 
-  loadFeed(content, auth, postCount);
+  if (auth) loadFeed(content, auth, postCount, onOpenPost);
   return el;
 }
 
-function formatRelativeTime(d: Date): string {
-  const ms = Date.now() - d.getTime();
-  const m = Math.floor(ms / 60_000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
-  return `${Math.floor(m / 60)}h ago`;
-}
-
-async function loadFeed(container: HTMLElement, auth: AuthState | null, postCount: number): Promise<void> {
-  if (!auth) return;
+async function loadFeed(container: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void): Promise<void> {
 
   container.innerHTML = `
     <div class="flex items-center justify-center py-20">
@@ -97,7 +85,7 @@ async function loadFeed(container: HTMLElement, auth: AuthState | null, postCoun
         <button id="btn-feed-retry" class="text-sm text-gold underline underline-offset-2">Retry</button>
       </div>
     `;
-    container.querySelector('#btn-feed-retry')?.addEventListener('click', () => loadFeed(container, auth, postCount));
+    container.querySelector('#btn-feed-retry')?.addEventListener('click', () => loadFeed(container, auth, postCount, onOpenPost));
     return;
   }
 
@@ -114,10 +102,10 @@ async function loadFeed(container: HTMLElement, auth: AuthState | null, postCoun
   }
 
   const unblurred = postCount > 0;
-  posts.forEach(post => container.appendChild(makePostCard(post, unblurred)));
+  posts.forEach(post => container.appendChild(makePostCard(post, unblurred, onOpenPost)));
 }
 
-function makePostCard(post: FeedPost, unblurred: boolean): HTMLElement {
+function makePostCard(post: FeedPost, unblurred: boolean, onOpenPost: (post: FeedPost) => void): HTMLElement {
   const card = document.createElement('article');
   card.className = 'border-b border-ink/8';
 
@@ -167,16 +155,7 @@ function makePostCard(post: FeedPost, unblurred: boolean): HTMLElement {
     overlay.appendChild(label);
     imgWrapper.appendChild(overlay);
   } else {
-    if (post.allMediaUrls.length > 1) {
-      const badge = document.createElement('a');
-      badge.href = post.url;
-      badge.target = '_blank';
-      badge.rel = 'noopener noreferrer';
-      badge.className = 'absolute top-3 right-3 bg-black/40 text-white text-xs px-2.5 py-1 rounded-full backdrop-blur-sm';
-      badge.textContent = `${post.allMediaUrls.length} photos`;
-      imgWrapper.appendChild(badge);
-    }
-    imgWrapper.addEventListener('click', () => window.open(post.url, '_blank', 'noopener,noreferrer'));
+    imgWrapper.addEventListener('click', () => onOpenPost(post));
   }
 
   card.appendChild(imgWrapper);
