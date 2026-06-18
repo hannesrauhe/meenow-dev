@@ -60,12 +60,7 @@ export function renderPostDetail(
   authorRow.appendChild(info);
   scrollArea.appendChild(authorRow);
 
-  // Full-width image
-  const photo = document.createElement('img');
-  photo.src = post.compositeUrl;
-  photo.className = 'w-full block';
-  photo.alt = 'meenow photo';
-  scrollArea.appendChild(photo);
+  scrollArea.appendChild(makePhotoSwiper(post));
 
   // Comments section
   const commentsSection = document.createElement('div');
@@ -123,6 +118,97 @@ export function renderPostDetail(
   loadComments(commentsSection, auth, post.id);
 
   return root;
+}
+
+function makePhotoSwiper(post: FeedPost): HTMLElement {
+  const urls = post.allMediaUrls;
+
+  if (urls.length <= 1) {
+    const img = document.createElement('img');
+    img.src = post.compositeUrl;
+    img.className = 'w-full block';
+    img.alt = 'meenow photo';
+    return img;
+  }
+
+  // Preload all images so swipe transitions are instant
+  urls.forEach(url => { const i = new Image(); i.src = url; });
+
+  const photoLabels = ['composite', 'surroundings', 'selfie'];
+  let currentIndex = 0;
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'relative overflow-hidden bg-black select-none';
+
+  const photo = document.createElement('img');
+  photo.src = urls[0];
+  photo.className = 'w-full block';
+  photo.style.transition = 'opacity 0.15s ease';
+  photo.alt = 'meenow photo';
+  wrapper.appendChild(photo);
+
+  // Label (top-left corner)
+  const labelEl = document.createElement('div');
+  labelEl.className = 'absolute top-3 left-3 bg-black/40 text-white text-xs px-2.5 py-1 rounded-full backdrop-blur-sm pointer-events-none';
+  labelEl.textContent = photoLabels[0];
+  wrapper.appendChild(labelEl);
+
+  // Dot indicators (bottom center)
+  const dotsBar = document.createElement('div');
+  dotsBar.className = 'absolute bottom-3 left-0 right-0 flex justify-center gap-1.5 pointer-events-none';
+  const dots = urls.map((_, i) => {
+    const dot = document.createElement('div');
+    dot.className = `w-1.5 h-1.5 rounded-full ${i === 0 ? 'bg-white' : 'bg-white/40'}`;
+    dotsBar.appendChild(dot);
+    return dot;
+  });
+  wrapper.appendChild(dotsBar);
+
+  const goTo = (index: number): void => {
+    if (index === currentIndex || index < 0 || index >= urls.length) return;
+    photo.style.opacity = '0';
+    setTimeout(() => {
+      currentIndex = index;
+      photo.src = urls[currentIndex];
+      photo.style.opacity = '1';
+      dots.forEach((d, i) => {
+        d.className = `w-1.5 h-1.5 rounded-full ${i === currentIndex ? 'bg-white' : 'bg-white/40'}`;
+      });
+      labelEl.textContent = photoLabels[currentIndex] ?? '';
+    }, 150);
+  };
+
+  // Touch swipe — lock axis after first significant movement so vertical scroll
+  // still works when the user is not doing a horizontal swipe.
+  let startX = 0;
+  let startY = 0;
+  let axis: 'h' | 'v' | null = null;
+
+  wrapper.addEventListener('touchstart', (e) => {
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    axis = null;
+  }, { passive: true });
+
+  wrapper.addEventListener('touchmove', (e) => {
+    if (axis === 'v') return;
+    const dx = Math.abs(e.touches[0].clientX - startX);
+    const dy = Math.abs(e.touches[0].clientY - startY);
+    if (axis === null && (dx > 5 || dy > 5)) {
+      axis = dx >= dy ? 'h' : 'v';
+    }
+    if (axis === 'h') e.preventDefault();
+  }, { passive: false });
+
+  wrapper.addEventListener('touchend', (e) => {
+    if (axis !== 'h') return;
+    const deltaX = e.changedTouches[0].clientX - startX;
+    if (Math.abs(deltaX) >= 40) {
+      goTo(deltaX < 0 ? currentIndex + 1 : currentIndex - 1);
+    }
+  }, { passive: true });
+
+  return wrapper;
 }
 
 async function loadComments(section: HTMLElement, auth: AuthState, statusId: string): Promise<void> {
