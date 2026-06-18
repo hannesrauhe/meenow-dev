@@ -132,14 +132,20 @@ export async function postMeenow(
 // --- Feed ---
 
 // Session-level home timeline cache. The first call does a full fetch; subsequent
-// calls use since_id so only new posts are transferred. _homePending deduplicates
-// concurrent callers (fetchTodayPostCount and fetchMeenowFeed both run on page load).
-interface HomeCache { statuses: MastodonStatus[]; newestId: string }
+// calls within HOME_CACHE_TTL_MS return the cached data directly. After the TTL,
+// an incremental fetch with since_id is attempted; incoming posts are deduplicated
+// by ID before merging because Pixelfed may return the full list regardless.
+// _homePending deduplicates concurrent callers during the initial page-load sequence.
+const HOME_CACHE_TTL_MS = 5 * 60_000;
+interface HomeCache { statuses: MastodonStatus[]; newestId: string; fetchedAt: number }
 let _homeCache: HomeCache | null = null;
 let _homePending: Promise<MastodonStatus[]> | null = null;
 
 function fetchHomeTimeline(auth: AuthState): Promise<MastodonStatus[]> {
   if (_homePending) return _homePending;
+  if (_homeCache && Date.now() - _homeCache.fetchedAt < HOME_CACHE_TTL_MS) {
+    return Promise.resolve(_homeCache.statuses);
+  }
 
   const url = _homeCache?.newestId
     ? `https://${auth.instance}/api/v1/timelines/home?limit=40&since_id=${_homeCache.newestId}`
@@ -148,13 +154,17 @@ function fetchHomeTimeline(auth: AuthState): Promise<MastodonStatus[]> {
   _homePending = fetch(url, { headers: { Authorization: `Bearer ${auth.accessToken}` } })
     .then(r => (r.ok ? (r.json() as Promise<MastodonStatus[]>) : Promise.resolve([])))
     .then(incoming => {
+      const now = Date.now();
       if (_homeCache) {
-        if (incoming.length > 0) {
-          _homeCache.statuses = [...incoming, ..._homeCache.statuses];
-          _homeCache.newestId = incoming[0].id;
+        const seen = new Set(_homeCache.statuses.map(s => s.id));
+        const fresh = incoming.filter(s => !seen.has(s.id));
+        if (fresh.length > 0) {
+          _homeCache.statuses = [...fresh, ..._homeCache.statuses];
+          _homeCache.newestId = fresh[0].id;
         }
+        _homeCache.fetchedAt = now;
       } else {
-        _homeCache = { statuses: incoming, newestId: incoming[0]?.id ?? '' };
+        _homeCache = { statuses: incoming, newestId: incoming[0]?.id ?? '', fetchedAt: now };
       }
       _homePending = null;
       return _homeCache.statuses;
