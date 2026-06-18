@@ -136,7 +136,8 @@ export async function postMeenow(
 // an incremental fetch with since_id is attempted; incoming posts are deduplicated
 // by ID before merging because Pixelfed may return the full list regardless.
 // _homePending deduplicates concurrent callers during the initial page-load sequence.
-const HOME_CACHE_TTL_MS = 5 * 60_000;
+const HOME_TIMELINE_LIMIT = 40;
+const HOME_CACHE_TTL_MS = 10_000;
 interface HomeCache { statuses: MastodonStatus[]; newestId: string; fetchedAt: number }
 let _homeCache: HomeCache | null = null;
 let _homePending: Promise<MastodonStatus[]> | null = null;
@@ -148,8 +149,8 @@ function fetchHomeTimeline(auth: AuthState): Promise<MastodonStatus[]> {
   }
 
   const url = _homeCache?.newestId
-    ? `https://${auth.instance}/api/v1/timelines/home?limit=40&since_id=${_homeCache.newestId}`
-    : `https://${auth.instance}/api/v1/timelines/home?limit=40`;
+    ? `https://${auth.instance}/api/v1/timelines/home?limit=${HOME_TIMELINE_LIMIT}&since_id=${_homeCache.newestId}`
+    : `https://${auth.instance}/api/v1/timelines/home?limit=${HOME_TIMELINE_LIMIT}`;
 
   _homePending = fetch(url, { headers: { Authorization: `Bearer ${auth.accessToken}` } })
     .then(r => (r.ok ? (r.json() as Promise<MastodonStatus[]>) : Promise.resolve([])))
