@@ -26,6 +26,7 @@ interface MastodonStatus {
   id: string;
   url: string;
   created_at: string;
+  replies_count: number;
   account: MastodonAccount;
   media_attachments: MastodonMediaAttachment[];
   tags: MastodonTag[];
@@ -37,6 +38,7 @@ export interface FeedPost {
   id: string;
   url: string;
   createdAt: Date;
+  replyCount: number;
   account: {
     displayName: string;
     username: string;
@@ -186,6 +188,7 @@ function toFeedPost(s: MastodonStatus): FeedPost {
     id: s.id,
     url: s.url,
     createdAt: new Date(s.created_at),
+    replyCount: s.replies_count,
     account: {
       displayName: s.account.display_name || s.account.username,
       username: s.account.username,

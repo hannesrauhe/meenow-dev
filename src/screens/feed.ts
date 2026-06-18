@@ -1,4 +1,4 @@
-import { SLEEPING_CAT } from '../icons';
+import { SLEEPING_CAT, SPEECH_BUBBLE_ICON } from '../icons';
 import { clearAuth, getAuthState, type AuthState } from '../api/auth';
 import { MAX_POSTS_PER_TRIGGER } from '../state';
 import { fetchMeenowFeed, type FeedPost } from '../api/pixelfed';
@@ -159,5 +159,19 @@ function makePostCard(post: FeedPost, unblurred: boolean, onOpenPost: (post: Fee
   }
 
   card.appendChild(imgWrapper);
+
+  if (post.replyCount > 0) {
+    const cardFooter = document.createElement('div');
+    cardFooter.className = 'flex items-center gap-1.5 px-4 py-2.5 text-xs text-ink/40';
+    const iconEl = document.createElement('span');
+    iconEl.className = 'w-3.5 h-3.5 shrink-0';
+    iconEl.innerHTML = SPEECH_BUBBLE_ICON;
+    cardFooter.appendChild(iconEl);
+    const countEl = document.createElement('span');
+    countEl.textContent = `${post.replyCount}`;
+    cardFooter.appendChild(countEl);
+    card.appendChild(cardFooter);
+  }
+
   return card;
 }
