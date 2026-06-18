@@ -118,10 +118,26 @@ export async function postMeenow(
   });
   if (!res.ok) throw new Error(`Post failed (${res.status})`);
   const status = await res.json() as { url: string };
+  // Invalidate so the feed picks up the new post on next render
+  _homeCache = null;
   return status.url;
 }
 
 // --- Feed ---
+
+// Short-lived cache for the home timeline. fetchTodayPostCount (called from init())
+// and fetchMeenowFeed (called when the feed renders) both need this data; the cache
+// lets them share one network request per page load.
+let _homeCache: { ts: number; data: Promise<MastodonStatus[]> } | null = null;
+
+function fetchHomeTimeline(auth: AuthState): Promise<MastodonStatus[]> {
+  if (_homeCache && Date.now() - _homeCache.ts < 30_000) return _homeCache.data;
+  const p = fetch(`https://${auth.instance}/api/v1/timelines/home?limit=40`, {
+    headers: { Authorization: `Bearer ${auth.accessToken}` },
+  }).then(r => (r.ok ? (r.json() as Promise<MastodonStatus[]>) : Promise.resolve([])));
+  _homeCache = { ts: Date.now(), data: p };
+  return p;
+}
 
 async function resolveAccountId(auth: AuthState): Promise<string | undefined> {
   if (auth.accountId) return auth.accountId;
@@ -159,14 +175,8 @@ function toFeedPost(s: MastodonStatus): FeedPost {
 
 export async function fetchMeenowFeed(auth: AuthState): Promise<FeedPost[]> {
   const cutoff = getLastTriggerTime().getTime();
-
-  const homeRes = await fetch(`https://${auth.instance}/api/v1/timelines/home?limit=40`, {
-    headers: { Authorization: `Bearer ${auth.accessToken}` },
-  });
-
-  const home: MastodonStatus[] = homeRes.ok ? await homeRes.json() as MastodonStatus[] : [];
-
-  return home
+  const statuses = await fetchHomeTimeline(auth);
+  return statuses
     .filter(s =>
       new Date(s.created_at).getTime() >= cutoff &&
       s.media_attachments.length > 0 &&
@@ -181,13 +191,9 @@ export async function fetchTodayPostCount(auth: AuthState): Promise<number> {
   if (!accountId) return 0;
   const periodStart = getLastTriggerTime().getTime();
   try {
-    const res = await fetch(
-      `https://${auth.instance}/api/v1/accounts/${accountId}/statuses?limit=10&exclude_replies=true`,
-      { headers: { Authorization: `Bearer ${auth.accessToken}` } },
-    );
-    if (!res.ok) return 0;
-    const statuses = await res.json() as MastodonStatus[];
+    const statuses = await fetchHomeTimeline(auth);
     return statuses.filter(s =>
+      s.account.id === accountId &&
       new Date(s.created_at).getTime() >= periodStart &&
       hasMeenowTag(s)
     ).length;
