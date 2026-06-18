@@ -135,13 +135,6 @@ function makePostCard(post: FeedPost, unblurred: boolean, onOpenPost: (post: Fee
   header.appendChild(info);
   card.appendChild(header);
 
-  if (post.statusText) {
-    const textEl = document.createElement('p');
-    textEl.className = 'px-4 pb-2 text-sm text-ink leading-relaxed whitespace-pre-line';
-    textEl.textContent = post.statusText;
-    card.appendChild(textEl);
-  }
-
   // Image wrapper
   const imgWrapper = document.createElement('div');
   imgWrapper.className = 'relative overflow-hidden cursor-pointer';
@@ -166,6 +159,13 @@ function makePostCard(post: FeedPost, unblurred: boolean, onOpenPost: (post: Fee
   }
 
   card.appendChild(imgWrapper);
+
+  if (post.statusText) {
+    const textEl = document.createElement('p');
+    textEl.className = 'px-4 pt-2 pb-1 text-sm text-ink leading-relaxed whitespace-pre-line';
+    textEl.textContent = post.statusText;
+    card.appendChild(textEl);
+  }
 
   if (post.replyCount > 0) {
     const cardFooter = document.createElement('div');

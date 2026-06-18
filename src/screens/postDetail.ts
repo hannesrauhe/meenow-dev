@@ -62,6 +62,13 @@ export function renderPostDetail(
 
   scrollArea.appendChild(makePhotoSwiper(post));
 
+  if (post.statusText) {
+    const textEl = document.createElement('p');
+    textEl.className = 'px-4 pt-3 pb-1 text-sm text-ink leading-relaxed whitespace-pre-line';
+    textEl.textContent = post.statusText;
+    scrollArea.appendChild(textEl);
+  }
+
   // Comments section
   const commentsSection = document.createElement('div');
   commentsSection.id = 'comments-section';
