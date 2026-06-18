@@ -356,7 +356,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone?: 
         const data = await res.json() as { address?: { city?: string; town?: string; village?: string; country?: string } };
         const city = data.address?.city ?? data.address?.town ?? data.address?.village;
         const country = data.address?.country;
-        locationText = [city, country].filter(Boolean).join(', ');
+        locationText = `📍 ${[city, country].filter(Boolean).join(', ')}`;
       } catch {
         locationText = '';
       }

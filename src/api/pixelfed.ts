@@ -42,6 +42,7 @@ export interface FeedPost {
   createdAt: Date;
   replyCount: number;
   statusText: string;
+  location: string;
   account: {
     displayName: string;
     username: string;
@@ -199,7 +200,7 @@ function hasMeenowTag(s: MastodonStatus): boolean {
   return s.tags.some(t => t.name.toLowerCase() === 'meenowapp');
 }
 
-function parseStatusText(htmlContent: string): string {
+function parseStatusParts(htmlContent: string): { caption: string; location: string } {
   const div = document.createElement('div');
   div.innerHTML = htmlContent;
   div.querySelectorAll('a').forEach(a => {
@@ -210,16 +211,24 @@ function parseStatusText(htmlContent: string): string {
   div.querySelectorAll('p').forEach(p => {
     p.prepend(document.createTextNode('\n'));
   });
-  return (div.textContent ?? '').replace(/\n{3,}/g, '\n\n').trim();
+  const full = (div.textContent ?? '').replace(/\n{3,}/g, '\n\n').trim();
+  const lines = full.split('\n');
+  const locIdx = lines.findIndex(l => l.startsWith('📍'));
+  if (locIdx === -1) return { caption: full, location: '' };
+  const location = lines[locIdx].replace(/^📍\s*/, '').trim();
+  lines.splice(locIdx, 1);
+  return { caption: lines.join('\n').trim(), location };
 }
 
 function toFeedPost(s: MastodonStatus): FeedPost {
+  const { caption, location } = parseStatusParts(s.content);
   return {
     id: s.id,
     url: s.url,
     createdAt: new Date(s.created_at),
     replyCount: s.replies_count,
-    statusText: parseStatusText(s.content),
+    statusText: caption,
+    location,
     account: {
       displayName: s.account.display_name || s.account.username,
       username: s.account.username,
