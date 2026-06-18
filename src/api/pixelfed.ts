@@ -26,6 +26,7 @@ interface MastodonStatus {
   id: string;
   url: string;
   created_at: string;
+  replies_count: number;
   account: MastodonAccount;
   media_attachments: MastodonMediaAttachment[];
   tags: MastodonTag[];
@@ -37,6 +38,7 @@ export interface FeedPost {
   id: string;
   url: string;
   createdAt: Date;
+  replyCount: number;
   account: {
     displayName: string;
     username: string;
@@ -117,11 +119,61 @@ export async function postMeenow(
     }),
   });
   if (!res.ok) throw new Error(`Post failed (${res.status})`);
-  const status = await res.json() as { url: string };
-  return status.url;
+  const statusData = await res.json() as MastodonStatus;
+  // Prepend the new post so the feed shows it immediately without a re-fetch.
+  // newestId advances so the next incremental fetch uses it as since_id.
+  if (_homeCache) {
+    _homeCache.statuses = [statusData, ..._homeCache.statuses];
+    if (statusData.id > _homeCache.newestId) _homeCache.newestId = statusData.id;
+  }
+  return statusData.url;
 }
 
 // --- Feed ---
+
+// Session-level home timeline cache. The first call does a full fetch; subsequent
+// calls within HOME_CACHE_TTL_MS return the cached data directly. After the TTL,
+// an incremental fetch with since_id is attempted; incoming posts are deduplicated
+// by ID before merging because Pixelfed may return the full list regardless.
+// _homePending deduplicates concurrent callers during the initial page-load sequence.
+const HOME_TIMELINE_LIMIT = 40;
+const HOME_CACHE_TTL_MS = 10_000;
+interface HomeCache { statuses: MastodonStatus[]; newestId: string; fetchedAt: number }
+let _homeCache: HomeCache | null = null;
+let _homePending: Promise<MastodonStatus[]> | null = null;
+
+function fetchHomeTimeline(auth: AuthState): Promise<MastodonStatus[]> {
+  if (_homePending) return _homePending;
+  if (_homeCache && Date.now() - _homeCache.fetchedAt < HOME_CACHE_TTL_MS) {
+    return Promise.resolve(_homeCache.statuses);
+  }
+
+  const url = _homeCache?.newestId
+    ? `https://${auth.instance}/api/v1/timelines/home?limit=${HOME_TIMELINE_LIMIT}&since_id=${_homeCache.newestId}`
+    : `https://${auth.instance}/api/v1/timelines/home?limit=${HOME_TIMELINE_LIMIT}`;
+
+  _homePending = fetch(url, { headers: { Authorization: `Bearer ${auth.accessToken}` } })
+    .then(r => (r.ok ? (r.json() as Promise<MastodonStatus[]>) : Promise.resolve([])))
+    .then(incoming => {
+      const now = Date.now();
+      if (_homeCache) {
+        const seen = new Set(_homeCache.statuses.map(s => s.id));
+        const fresh = incoming.filter(s => !seen.has(s.id));
+        if (fresh.length > 0) {
+          _homeCache.statuses = [...fresh, ..._homeCache.statuses];
+          _homeCache.newestId = fresh[0].id;
+        }
+        _homeCache.fetchedAt = now;
+      } else {
+        _homeCache = { statuses: incoming, newestId: incoming[0]?.id ?? '', fetchedAt: now };
+      }
+      _homePending = null;
+      return _homeCache.statuses;
+    })
+    .catch(err => { _homePending = null; throw err; });
+
+  return _homePending;
+}
 
 async function resolveAccountId(auth: AuthState): Promise<string | undefined> {
   if (auth.accountId) return auth.accountId;
@@ -147,6 +199,7 @@ function toFeedPost(s: MastodonStatus): FeedPost {
     id: s.id,
     url: s.url,
     createdAt: new Date(s.created_at),
+    replyCount: s.replies_count,
     account: {
       displayName: s.account.display_name || s.account.username,
       username: s.account.username,
@@ -159,33 +212,13 @@ function toFeedPost(s: MastodonStatus): FeedPost {
 
 export async function fetchMeenowFeed(auth: AuthState): Promise<FeedPost[]> {
   const cutoff = getLastTriggerTime().getTime();
-  const accountId = await resolveAccountId(auth);
-
-  const [homeRes, ownRes] = await Promise.all([
-    fetch(`https://${auth.instance}/api/v1/timelines/home?limit=40`, {
-      headers: { Authorization: `Bearer ${auth.accessToken}` },
-    }),
-    accountId
-      ? fetch(`https://${auth.instance}/api/v1/accounts/${accountId}/statuses?limit=20&exclude_replies=true`, {
-          headers: { Authorization: `Bearer ${auth.accessToken}` },
-        })
-      : Promise.resolve(new Response('[]', { status: 200 })),
-  ]);
-
-  const home: MastodonStatus[] = homeRes.ok ? await homeRes.json() as MastodonStatus[] : [];
-  const own: MastodonStatus[] = ownRes.ok ? await ownRes.json() as MastodonStatus[] : [];
-
-  const seen = new Set<string>();
-  return [...home, ...own]
-    .filter(s => {
-      if (seen.has(s.id)) return false;
-      seen.add(s.id);
-      return (
-        new Date(s.created_at).getTime() >= cutoff &&
-        s.media_attachments.length > 0 &&
-        hasMeenowTag(s)
-      );
-    })
+  const statuses = await fetchHomeTimeline(auth);
+  return statuses
+    .filter(s =>
+      new Date(s.created_at).getTime() >= cutoff &&
+      s.media_attachments.length > 0 &&
+      hasMeenowTag(s)
+    )
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .map(toFeedPost);
 }
@@ -195,13 +228,9 @@ export async function fetchTodayPostCount(auth: AuthState): Promise<number> {
   if (!accountId) return 0;
   const periodStart = getLastTriggerTime().getTime();
   try {
-    const res = await fetch(
-      `https://${auth.instance}/api/v1/accounts/${accountId}/statuses?limit=10&exclude_replies=true`,
-      { headers: { Authorization: `Bearer ${auth.accessToken}` } },
-    );
-    if (!res.ok) return 0;
-    const statuses = await res.json() as MastodonStatus[];
+    const statuses = await fetchHomeTimeline(auth);
     return statuses.filter(s =>
+      s.account.id === accountId &&
       new Date(s.created_at).getTime() >= periodStart &&
       hasMeenowTag(s)
     ).length;
