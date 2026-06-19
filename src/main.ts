@@ -82,10 +82,7 @@ function mountCapture(): void {
   window.addEventListener('popstate', onPopState, { once: true });
 
   app.appendChild(renderCapture(periodPostCount, onPosted, () => {
-    window.removeEventListener('popstate', onPopState);
     history.back();
-    activeScreen = null;
-    tick();
   }));
 }
 
@@ -106,10 +103,7 @@ function mountPostDetail(post: FeedPost, onClose?: () => void): void {
   let el: HTMLElement;
   try {
     el = renderPostDetail(post, auth, () => {
-      window.removeEventListener('popstate', onPopState);
       history.back();
-      activeScreen = null;
-      returnTo();
     });
   } catch {
     window.removeEventListener('popstate', onPopState);
@@ -149,10 +143,7 @@ function mountGrid(): void {
   };
 
   const onBack = (): void => {
-    if (popHandler) { window.removeEventListener('popstate', popHandler); popHandler = null; }
     history.back();
-    activeScreen = null;
-    tick();
   };
 
   installPop();
