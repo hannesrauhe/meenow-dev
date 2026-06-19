@@ -47,7 +47,7 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
 
   const visibility = document.createElement('p');
   visibility.className = 'text-ink/40';
-  visibility.textContent = 'Your followers can see today’s posts · archived automatically on Pixelfed';
+  visibility.textContent = "Your followers can see today’s posts in meenow and on Pixelfed";
   footer.appendChild(visibility);
 
   const credit = document.createElement('p');

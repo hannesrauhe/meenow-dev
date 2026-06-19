@@ -212,6 +212,14 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone?: 
     btn.innerHTML = CAT_EARS_SHUTTER;
     btn.addEventListener('click', () => show('back'));
     d.appendChild(btn);
+
+    const note = document.createElement('div');
+    note.className = 'text-xs text-center max-w-xs leading-relaxed space-y-2 border border-ink/10 rounded-xl px-4 py-3';
+    note.innerHTML = `
+      <p class="text-ink/60">Your followers on Pixelfed will see each photo you post. meenow uses <strong>followers-only</strong> visibility.</p>
+      <p class="text-ink/50">On Pixelfed, photos are archived automatically after the next daily trigger — hidden from followers, but still visible to you.</p>
+    `;
+    d.appendChild(note);
     return d;
   }
 
