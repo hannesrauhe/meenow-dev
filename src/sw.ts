@@ -16,6 +16,10 @@ const NOTIFICATION_WINDOW_MS = 30 * 60 * 1000;
 // will usually have expired before the next push arrives.
 let lastNotifiedTriggerMs = 0;
 
+self.addEventListener('message', (event: ExtendableMessageEvent) => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
+});
+
 self.addEventListener('push', event => {
   const data: { ts?: number; force?: boolean } = event.data?.json() ?? {};
   const now = Date.now();
