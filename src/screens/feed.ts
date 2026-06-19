@@ -1,10 +1,10 @@
-import { SLEEPING_CAT, SPEECH_BUBBLE_ICON } from '../icons';
+import { SLEEPING_CAT, SPEECH_BUBBLE_ICON, GRID_ICON } from '../icons';
 import { clearAuth, getAuthState, type AuthState } from '../api/auth';
 import { MAX_POSTS_PER_TRIGGER } from '../state';
 import { fetchMeenowFeed, type FeedPost } from '../api/pixelfed';
 import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime, formatCountdown, formatRelativeTime } from '../timer';
 
-export function renderFeed(onRequestCapture: () => void, postCount: number, onOpenPost: (post: FeedPost) => void): HTMLElement {
+export function renderFeed(onRequestCapture: () => void, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenArchive: () => void): HTMLElement {
   const auth = getAuthState();
   const el = document.createElement('div');
   el.className = 'min-h-dvh flex flex-col bg-cream';
@@ -16,6 +16,7 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
   header.innerHTML = `
     <h1 class="text-xl font-semibold tracking-tight text-ink">meenow</h1>
     <div class="flex items-center gap-3">
+      <button id="btn-archive" class="w-5 h-5 text-ink/40 hover:text-ink/70 transition-colors shrink-0">${GRID_ICON}</button>
       ${!atQuota ? `<button id="btn-post-again" class="text-sm font-semibold text-gold">+ Post</button>` : ''}
       <span id="header-status" class="text-xs text-ink/40">${!atQuota ? `${postCount}/${MAX_POSTS_PER_TRIGGER} posted` : ''}</span>
     </div>
@@ -61,6 +62,7 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
 
   el.appendChild(footer);
 
+  header.querySelector('#btn-archive')?.addEventListener('click', onOpenArchive);
   header.querySelector('#btn-post-again')?.addEventListener('click', onRequestCapture);
 
   if (auth) loadFeed(content, auth, postCount, onOpenPost);

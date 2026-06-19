@@ -279,6 +279,30 @@ export async function fetchTodayPostCount(auth: AuthState): Promise<number> {
   }
 }
 
+export async function fetchMyMeenowPage(
+  auth: AuthState,
+  maxId?: string,
+): Promise<{ posts: FeedPost[]; cursor: string | null }> {
+  const accountId = await resolveAccountId(auth);
+  if (!accountId) return { posts: [], cursor: null };
+
+  const params = new URLSearchParams({ limit: '40', only_media: 'true' });
+  if (maxId) params.set('max_id', maxId);
+
+  const res = await fetch(`https://${auth.instance}/api/v1/accounts/${accountId}/statuses?${params}`, {
+    headers: { Authorization: `Bearer ${auth.accessToken}` },
+  });
+  if (!res.ok) throw new Error(`Account statuses fetch failed (${res.status})`);
+  const statuses = await res.json() as MastodonStatus[];
+
+  const posts = statuses
+    .filter(s => s.media_attachments.length > 0 && hasMeenowTag(s))
+    .map(toFeedPost);
+
+  const cursor = statuses.length === 40 ? statuses[statuses.length - 1].id : null;
+  return { posts, cursor };
+}
+
 export async function fetchPostContext(auth: AuthState, statusId: string): Promise<PostContext> {
   const res = await fetch(`https://${auth.instance}/api/v1/statuses/${statusId}/context`, {
     headers: { Authorization: `Bearer ${auth.accessToken}` },

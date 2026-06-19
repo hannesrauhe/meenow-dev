@@ -9,13 +9,14 @@ import { renderCapture } from './screens/capture';
 import { renderFeed } from './screens/feed';
 import { renderLogin } from './screens/login';
 import { renderPostDetail } from './screens/postDetail';
+import { renderArchive } from './screens/archive';
 import type { FeedPost } from './api/pixelfed';
 import { renderInstallNudge, removeInstallNudge } from './components/installNudge';
 import { renderNotificationNudge, removeNotificationNudge } from './components/notificationNudge';
 import { registerSW } from 'virtual:pwa-register';
 
 const app = document.getElementById('app')!;
-type Screen = AppState | 'login' | 'capturing' | 'post_detail';
+type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'archive';
 let activeScreen: Screen | null = null;
 let tickId: number | null = null;
 
@@ -87,6 +88,27 @@ function mountCapture(): void {
   }));
 }
 
+function mountArchive(): void {
+  const auth = getAuthState();
+  if (!auth) return;
+  activeScreen = 'archive';
+  app.innerHTML = '';
+  removeInstallNudge();
+  removeNotificationNudge();
+
+  history.pushState({ screen: 'archive' }, '');
+
+  const onPopState = () => { activeScreen = null; tick(); };
+  window.addEventListener('popstate', onPopState, { once: true });
+
+  app.appendChild(renderArchive(auth, mountPostDetail, () => {
+    window.removeEventListener('popstate', onPopState);
+    history.back();
+    activeScreen = null;
+    tick();
+  }));
+}
+
 function mountPostDetail(post: FeedPost): void {
   const auth = getAuthState();
   if (!auth) return;
@@ -129,7 +151,7 @@ function mount(screen: AppState | 'login'): void {
     app.appendChild(renderCapture(periodPostCount, onPosted, () => { activeScreen = null; }));
     void renderNotificationNudge();
   } else {
-    app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail));
+    app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountArchive));
     void renderNotificationNudge();
     renderInstallNudge();
   }
@@ -138,6 +160,7 @@ function mount(screen: AppState | 'login'): void {
 function tick(): void {
   if (activeScreen === 'capturing') return;
   if (activeScreen === 'post_detail') return;
+  if (activeScreen === 'archive') return;
 
   // Detect when a new trigger period starts while the app is open (e.g. trigger
   // fires at 3 PM while the user is on the countdown after posting twice).
