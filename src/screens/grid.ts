@@ -1,3 +1,4 @@
+// Grid screen: archive of the authenticated user's own meenow photos in a 3-column grid grouped by month.
 import { CHEVRON_LEFT_ICON } from '../icons';
 import type { AuthState } from '../api/auth';
 import { fetchMyAllPosts, type FeedPost } from '../api/pixelfed';

@@ -1,3 +1,4 @@
+// Persistent local state: localStorage helpers for notification dismiss, install dismiss, and push subscription filename.
 export const MAX_POSTS_PER_TRIGGER = 2;
 
 export function isNotificationNudgeDismissed(): boolean {

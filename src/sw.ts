@@ -1,3 +1,4 @@
+// Service worker: Workbox precache/route and push-notification handler (shows notification only near the daily trigger time).
 import { precacheAndRoute } from 'workbox-precaching';
 import { getLastTriggerTime } from './timer';
 

@@ -1,3 +1,4 @@
+// Feed screen: main home feed showing today's meenow posts from followed accounts.
 import { SLEEPING_CAT, SPEECH_BUBBLE_ICON, GRID_ICON } from '../icons';
 import { clearAuth, getAuthState, type AuthState } from '../api/auth';
 import { MAX_POSTS_PER_TRIGGER } from '../state';

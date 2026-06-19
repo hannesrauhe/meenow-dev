@@ -1,3 +1,4 @@
+// Capture screen: dual-camera photo capture flow (back camera then selfie), composite stitching, preview with optional caption/location, and post submission.
 import { MAX_POSTS_PER_TRIGGER } from '../state';
 
 const CAMERA_SWITCH_DELAY_MS = 600; // browser needs time to release back camera before front opens

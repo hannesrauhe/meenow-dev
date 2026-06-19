@@ -1,3 +1,4 @@
+// App entry point: screen mounting/routing, tick loop, overlay navigation (capture, post-detail, grid).
 declare const __GIT_HASH__: string;
 
 import './style.css';

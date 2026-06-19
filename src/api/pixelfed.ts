@@ -1,3 +1,4 @@
+// Pixelfed/Mastodon API client: media upload, posting, home timeline cache, feed filtering, post context, replies, and user's own posts.
 import type { AuthState } from './auth';
 import { patchAccountId } from './auth';
 import { getLastTriggerTime } from '../timer';

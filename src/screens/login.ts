@@ -1,3 +1,4 @@
+// Login screen: OAuth PKCE entry point; prompts for a Pixelfed instance URL and initiates the auth flow.
 import { startOAuthFlow } from '../api/auth';
 
 export function renderLogin(): HTMLElement {
