@@ -6,6 +6,16 @@ Users receive a daily prompt at a pseudo-random local time (between 9 AM and 9 P
 
 ---
 
+## Privacy & Visibility
+
+**Who can see your photos?** meenow posts with followers-only visibility. Your followers on Pixelfed (or any connected Mastodon-compatible instance) will be able to see each photo in their home feed.
+
+**Automatic archiving on Pixelfed:** After the next daily trigger fires, meenow automatically archives your older posts using the Pixelfed archive API. Archived posts are hidden from your followers but remain visible to you in your Pixelfed archive and in meenow's own grid view (My Photos). This archiving does not apply on standard Mastodon instances, where posts remain visible to followers indefinitely.
+
+**Recommendation:** Use a Pixelfed account with restricted followers (i.e. approve follower requests) so that you control who can see your daily photos before they are archived.
+
+---
+
 ## Architecture
 
 ```
