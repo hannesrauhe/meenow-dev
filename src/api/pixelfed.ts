@@ -240,9 +240,30 @@ function toFeedPost(s: MastodonStatus): FeedPost {
   };
 }
 
+function triggerArchive(auth: AuthState, statuses: MastodonStatus[]): void {
+  if (!auth.accountId) return;
+  const cutoff = getLastTriggerTime();
+  Promise.allSettled(
+    statuses
+      .filter(s =>
+        s.account.id === auth.accountId &&
+        hasMeenowTag(s) &&
+        s.media_attachments.length > 0 &&
+        new Date(s.created_at) < cutoff
+      )
+      .map(s =>
+        fetch(`https://${auth.instance}/api/v1.1/archive/add/${s.id}`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${auth.accessToken}` },
+        })
+      )
+  );
+}
+
 export async function fetchMeenowFeed(auth: AuthState): Promise<FeedPost[]> {
   const cutoff = getLastTriggerTime().getTime();
   const statuses = await fetchHomeTimeline(auth);
+  triggerArchive(auth, statuses);
   const sorted = statuses
     .filter(s =>
       new Date(s.created_at).getTime() >= cutoff &&
@@ -308,17 +329,7 @@ export async function fetchMyAllPosts(auth: AuthState): Promise<FeedPost[]> {
   if (!res.ok) throw new Error(`Fetch failed (${res.status})`);
   const statuses = await res.json() as MastodonStatus[];
 
-  const cutoff = getLastTriggerTime();
-  Promise.allSettled(
-    statuses
-      .filter(s => hasMeenowTag(s) && s.media_attachments.length > 0 && new Date(s.created_at) < cutoff)
-      .map(s =>
-        fetch(`https://${auth.instance}/api/v1.1/archive/add/${s.id}`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${auth.accessToken}` },
-        })
-      )
-  );
+  triggerArchive(auth, statuses);
 
   const seen = new Set(statuses.map(s => s.id));
   const merged = [...statuses, ...archived.filter(s => !seen.has(s.id))];
