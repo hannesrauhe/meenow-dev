@@ -1,3 +1,4 @@
+// Component: push-notification opt-in nudge banner (rendered over the feed and awaiting-capture screens).
 import { isPushSupported, isNotificationsEnabled, enableNotifications } from '../notifications';
 import { isNotificationNudgeDismissed, dismissNotificationNudge } from '../state';
 

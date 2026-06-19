@@ -1,3 +1,4 @@
+// Push notifications: VAPID subscription registration, permission request, and relay-repo subscription management.
 import { getPushSubFilename, setPushSubFilename } from './state';
 
 // These are injected at build time from GitHub repo secrets (VITE_* prefix).

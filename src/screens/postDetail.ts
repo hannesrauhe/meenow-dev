@@ -1,3 +1,4 @@
+// Post detail screen: full-screen view of a single post with photo swiper, caption, location, comments, and reply input.
 import { CHEVRON_LEFT_ICON } from '../icons';
 import type { AuthState } from '../api/auth';
 import { fetchPostContext, postReply, type FeedPost, type MastodonReply } from '../api/pixelfed';

@@ -1,3 +1,4 @@
+// Pixelfed/Mastodon API client: media upload, posting, home timeline cache, feed filtering, post context, replies, and user's own posts.
 import type { AuthState } from './auth';
 import { patchAccountId } from './auth';
 import { getLastTriggerTime } from '../timer';
@@ -277,6 +278,21 @@ export async function fetchTodayPostCount(auth: AuthState): Promise<number> {
   } catch {
     return 0;
   }
+}
+
+export async function fetchMyAllPosts(auth: AuthState): Promise<FeedPost[]> {
+  const accountId = await resolveAccountId(auth);
+  if (!accountId) return [];
+  const url = new URL(`https://${auth.instance}/api/v1/accounts/${accountId}/statuses`);
+  url.searchParams.set('limit', '40');
+  url.searchParams.set('only_media', 'true');
+  const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${auth.accessToken}` } });
+  if (!res.ok) throw new Error(`Fetch failed (${res.status})`);
+  const statuses = await res.json() as MastodonStatus[];
+  return statuses
+    .filter(s => hasMeenowTag(s) && s.media_attachments.length > 0)
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .map(toFeedPost);
 }
 
 export async function fetchPostContext(auth: AuthState, statusId: string): Promise<PostContext> {

@@ -1,3 +1,4 @@
+// Component: PWA install-to-home-screen nudge banner (rendered over the feed and login screens).
 import { isPwaInstalled, isInstallDismissed, dismissInstall } from '../state';
 
 type BeforeInstallPromptEvent = Event & { prompt(): Promise<void> };
