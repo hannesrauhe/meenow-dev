@@ -280,16 +280,36 @@ export async function fetchTodayPostCount(auth: AuthState): Promise<number> {
   }
 }
 
+async function fetchArchivedStatuses(auth: AuthState): Promise<MastodonStatus[]> {
+  try {
+    const res = await fetch(`https://${auth.instance}/api/v1.1/archive/list`, {
+      headers: { Authorization: `Bearer ${auth.accessToken}` },
+    });
+    if (!res.ok) return [];
+    return await res.json() as MastodonStatus[];
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchMyAllPosts(auth: AuthState): Promise<FeedPost[]> {
   const accountId = await resolveAccountId(auth);
   if (!accountId) return [];
   const url = new URL(`https://${auth.instance}/api/v1/accounts/${accountId}/statuses`);
   url.searchParams.set('limit', '40');
   url.searchParams.set('only_media', 'true');
-  const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${auth.accessToken}` } });
+
+  const [res, archived] = await Promise.all([
+    fetch(url.toString(), { headers: { Authorization: `Bearer ${auth.accessToken}` } }),
+    fetchArchivedStatuses(auth),
+  ]);
   if (!res.ok) throw new Error(`Fetch failed (${res.status})`);
   const statuses = await res.json() as MastodonStatus[];
-  return statuses
+
+  const seen = new Set(statuses.map(s => s.id));
+  const merged = [...statuses, ...archived.filter(s => !seen.has(s.id))];
+
+  return merged
     .filter(s => hasMeenowTag(s) && s.media_attachments.length > 0)
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .map(toFeedPost);
