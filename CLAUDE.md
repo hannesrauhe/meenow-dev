@@ -81,6 +81,18 @@ Any combination is valid (caption only, location only, both, or neither). The `#
 `src/screens/grid.ts` renders a personal photo archive reachable via the grid icon button in the feed header.
 
 - **Entry point**: `renderGrid(auth, onOpenPost, onBack)` — mounted via `mountGrid()` in `main.ts`, which follows the same history-push / popstate pattern as `mountPostDetail`.
-- **Data**: fetches the authenticated user's own meenow posts via `fetchMyAllPosts` in `src/api/pixelfed.ts` (calls `GET /api/v1/accounts/:id/statuses?only_media=true`). Posts are filtered client-side for the `#meenowApp` tag and sorted newest-first.
+- **Data**: fetches the authenticated user's own meenow posts via `fetchMyAllPosts` in `src/api/pixelfed.ts`. This calls two endpoints in parallel: `GET /api/v1/accounts/:id/statuses?only_media=true` (active posts) and the Pixelfed-specific `GET /api/v1.1/archive/list` (archived posts). Results are merged and deduplicated by ID. On non-Pixelfed instances the archive endpoint returns a non-2xx response and is silently ignored. Posts are filtered client-side for the `#meenowApp` tag and sorted newest-first.
 - **Layout**: sticky header with back button, posts grouped by month with headings, and a 3-column `grid-cols-3` thumbnail grid. Tapping a thumbnail calls `onOpenPost(post)` to open the existing post detail view. Empty state, loading, and error states mirror the feed screen's patterns.
 - **Navigation**: `mountGrid` removes its own `popstate` listener before delegating to `mountPostDetail` (to avoid double-firing on browser back), then re-registers it when detail closes and restores the grid UI in-place without an extra `pushState`.
+
+## Automatic archiving of old posts
+
+Posts older than the last trigger time are automatically archived on Pixelfed (hidden from other users) via the Pixelfed-specific `POST /api/v1.1/archive/add/:id` endpoint. Archiving is fire-and-forget: failures are silently swallowed, and on non-Pixelfed instances the calls are no-ops.
+
+The logic lives in the private `triggerArchive(auth, statuses)` helper in `src/api/pixelfed.ts`. It filters for the authenticated user's own meenow posts (`s.account.id === auth.accountId`) that have media and predate `getLastTriggerTime()`, then fires `Promise.allSettled` over the archive calls without blocking the caller.
+
+`triggerArchive` is called as a side-effect from two places:
+- `fetchMeenowFeed` — fires when the feed screen loads (the most common path).
+- `fetchMyAllPosts` — fires when the grid screen opens.
+
+Archived posts remain visible to the owner in the grid because `fetchMyAllPosts` merges the active-statuses response with the archive-list response.
