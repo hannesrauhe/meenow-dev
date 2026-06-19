@@ -1,0 +1,46 @@
+name: Send notification tick
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: .
+
+      - uses: actions/checkout@v5
+        with:
+          repository: meenow-de/meenow-push
+          token: ${{ secrets.PUSH_SUBS_TOKEN }}
+          path: push-subs
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Install script dependencies
+        run: npm install
+        working-directory: scripts
+
+      - name: Send tick
+        env:
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
+          VAPID_SUBJECT: mailto:2qhhabkrd@mozmail.com
+          # Sends to dev subscriptions only; prod workflow lives in meenow-de/meenow
+          SUBS_DIR: push-subs/subscriptions/dev
+        run: node scripts/send-tick.mjs
+
+      - name: Commit expired subscription removals
+        working-directory: push-subs
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add subscriptions/dev/
+          git diff --staged --quiet || (git commit -m "Remove expired subscriptions" && git push)

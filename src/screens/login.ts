@@ -1,3 +1,4 @@
+// Login screen: OAuth PKCE entry point; prompts for a Pixelfed instance URL and initiates the auth flow.
 import { startOAuthFlow } from '../api/auth';
 
 export function renderLogin(): HTMLElement {
@@ -33,10 +34,11 @@ export function renderLogin(): HTMLElement {
       <button type="submit" id="login-submit" class="btn-primary w-full">Connect</button>
     </form>
 
-    <p class="text-xs text-ink/30 text-center max-w-xs leading-relaxed">
-      meenow posts to your account with followers-only visibility.<br/>
-      Your credentials are never stored by this app.
-    </p>
+    <div class="text-xs text-center max-w-xs leading-relaxed space-y-2 border border-ink/10 rounded-xl px-4 py-3">
+      <p class="text-ink/60">Your followers on Pixelfed will see each photo you post. meenow uses <strong>followers-only</strong> visibility.</p>
+      <p class="text-ink/50">On Pixelfed, photos are archived automatically after the next daily trigger — hidden from followers, but still visible to you.</p>
+      <p class="text-ink/40">We recommend a Pixelfed account with restricted followers. Your credentials are never stored by this app.</p>
+    </div>
 
     <p class="text-xs text-ink/25 text-center mt-4">
       Meenow is an experimental side project by

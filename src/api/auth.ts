@@ -1,3 +1,4 @@
+// OAuth PKCE auth: client registration, login flow, token/accountId storage, and auth state helpers.
 const PREFIX = 'meenow:auth:';
 
 export interface AuthState {

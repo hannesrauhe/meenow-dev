@@ -105,3 +105,11 @@ export function formatCountdown(ms: number): string {
 export function formatShortDateTime(d: Date): string {
   return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
+
+export function formatRelativeTime(d: Date): string {
+  const ms = Date.now() - d.getTime();
+  const m = Math.floor(ms / 60_000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  return `${Math.floor(m / 60)}h ago`;
+}

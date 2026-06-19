@@ -1,6 +1,8 @@
+// Pixelfed/Mastodon API client: media upload, posting, home timeline cache, feed filtering, post context, replies, and user's own posts.
 import type { AuthState } from './auth';
 import { patchAccountId } from './auth';
 import { getLastTriggerTime } from '../timer';
+import { MAX_POSTS_PER_TRIGGER } from '../state';
 
 // --- Mastodon/Pixelfed API types ---
 
@@ -26,6 +28,8 @@ interface MastodonStatus {
   id: string;
   url: string;
   created_at: string;
+  replies_count: number;
+  content: string;
   account: MastodonAccount;
   media_attachments: MastodonMediaAttachment[];
   tags: MastodonTag[];
@@ -37,6 +41,9 @@ export interface FeedPost {
   id: string;
   url: string;
   createdAt: Date;
+  replyCount: number;
+  statusText: string;
+  location: string;
   account: {
     displayName: string;
     username: string;
@@ -44,6 +51,22 @@ export interface FeedPost {
   };
   compositeUrl: string;
   allMediaUrls: string[];
+}
+
+export interface MastodonReply {
+  id: string;
+  created_at: string;
+  account: {
+    display_name: string;
+    username: string;
+    avatar: string;
+  };
+  content: string;
+}
+
+export interface PostContext {
+  ancestors: MastodonReply[];
+  descendants: MastodonReply[];
 }
 
 // --- Upload / post ---
@@ -80,6 +103,7 @@ export async function postMeenow(
   composite: Blob,
   backPhoto: Blob,
   frontPhoto: Blob,
+  statusText?: string,
 ): Promise<string> {
   // Upload composite first so it gets the lowest attachment ID and appears first in the gallery
   const compositeId = await uploadOne(auth, composite, 'meenow — daily photo');
@@ -88,6 +112,7 @@ export async function postMeenow(
     uploadOne(auth, frontPhoto, 'meenow — selfie'),
   ]);
 
+  const status = statusText ? `${statusText}\n\n#meenowApp` : '#meenowApp';
   const res = await fetch(`https://${auth.instance}/api/v1/statuses`, {
     method: 'POST',
     headers: {
@@ -95,23 +120,116 @@ export async function postMeenow(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      status: '#meenowApp',
+      status,
       media_ids: [compositeId, backId, frontId],
       visibility: 'private',
     }),
   });
   if (!res.ok) throw new Error(`Post failed (${res.status})`);
-  const status = await res.json() as { url: string };
-  return status.url;
+  const statusData = await res.json() as MastodonStatus;
+  // Prepend the new post so the feed shows it immediately without a re-fetch.
+  // newestId advances so the next incremental fetch uses it as since_id.
+  if (_homeCache) {
+    _homeCache.statuses = [statusData, ..._homeCache.statuses];
+    if (statusData.id > _homeCache.newestId) _homeCache.newestId = statusData.id;
+  }
+  return statusData.url;
 }
 
 // --- Feed ---
 
+// Session-level home timeline cache. The first call does a full fetch; subsequent
+// calls within HOME_CACHE_TTL_MS return the cached data directly. After the TTL,
+// an incremental fetch with since_id is attempted; incoming posts are deduplicated
+// by ID before merging because Pixelfed may return the full list regardless.
+// _homePending deduplicates concurrent callers during the initial page-load sequence.
+const HOME_TIMELINE_LIMIT = 40;
+const HOME_CACHE_TTL_MS = 10_000;
+interface HomeCache { statuses: MastodonStatus[]; newestId: string; fetchedAt: number }
+let _homeCache: HomeCache | null = null;
+let _homePending: Promise<MastodonStatus[]> | null = null;
+
+function fetchHomeTimeline(auth: AuthState): Promise<MastodonStatus[]> {
+  if (_homePending) return _homePending;
+  if (_homeCache && Date.now() - _homeCache.fetchedAt < HOME_CACHE_TTL_MS) {
+    return Promise.resolve(_homeCache.statuses);
+  }
+
+  const url = _homeCache?.newestId
+    ? `https://${auth.instance}/api/v1/timelines/home?limit=${HOME_TIMELINE_LIMIT}&since_id=${_homeCache.newestId}`
+    : `https://${auth.instance}/api/v1/timelines/home?limit=${HOME_TIMELINE_LIMIT}`;
+
+  _homePending = fetch(url, { headers: { Authorization: `Bearer ${auth.accessToken}` } })
+    .then(r => (r.ok ? (r.json() as Promise<MastodonStatus[]>) : Promise.resolve([])))
+    .then(incoming => {
+      const now = Date.now();
+      if (_homeCache) {
+        const seen = new Set(_homeCache.statuses.map(s => s.id));
+        const fresh = incoming.filter(s => !seen.has(s.id));
+        if (fresh.length > 0) {
+          _homeCache.statuses = [...fresh, ..._homeCache.statuses];
+          _homeCache.newestId = fresh[0].id;
+        }
+        _homeCache.fetchedAt = now;
+      } else {
+        _homeCache = { statuses: incoming, newestId: incoming[0]?.id ?? '', fetchedAt: now };
+      }
+      _homePending = null;
+      return _homeCache.statuses;
+    })
+    .catch(err => { _homePending = null; throw err; });
+
+  return _homePending;
+}
+
+async function resolveAccountId(auth: AuthState): Promise<string | undefined> {
+  if (auth.accountId) return auth.accountId;
+  try {
+    const res = await fetch(`https://${auth.instance}/api/v1/accounts/verify_credentials`, {
+      headers: { Authorization: `Bearer ${auth.accessToken}` },
+    });
+    if (res.ok) {
+      const { id } = await res.json() as { id: string };
+      patchAccountId(auth.instance, id);
+      return id;
+    }
+  } catch { /* ignore */ }
+  return undefined;
+}
+
+function hasMeenowTag(s: MastodonStatus): boolean {
+  return s.tags.some(t => t.name.toLowerCase() === 'meenowapp');
+}
+
+function parseStatusParts(htmlContent: string): { caption: string; location: string } {
+  const div = document.createElement('div');
+  div.innerHTML = htmlContent;
+  div.querySelectorAll('a').forEach(a => {
+    if ((a.textContent ?? '').replace(/[^a-z]/gi, '').toLowerCase() === 'meenowapp') {
+      a.remove();
+    }
+  });
+  div.querySelectorAll('p').forEach(p => {
+    p.prepend(document.createTextNode('\n'));
+  });
+  const full = (div.textContent ?? '').replace(/\n{3,}/g, '\n\n').trim();
+  const lines = full.split('\n');
+  const locIdx = lines.findIndex(l => l.startsWith('📍'));
+  if (locIdx === -1) return { caption: full, location: '' };
+  const location = lines[locIdx].replace(/^📍\s*/, '').trim();
+  lines.splice(locIdx, 1);
+  return { caption: lines.join('\n').trim(), location };
+}
+
 function toFeedPost(s: MastodonStatus): FeedPost {
+  const { caption, location } = parseStatusParts(s.content);
   return {
     id: s.id,
     url: s.url,
     createdAt: new Date(s.created_at),
+    replyCount: s.replies_count,
+    statusText: caption,
+    location,
     account: {
       displayName: s.account.display_name || s.account.username,
       username: s.account.username,
@@ -122,68 +240,127 @@ function toFeedPost(s: MastodonStatus): FeedPost {
   };
 }
 
-export async function fetchMeenowFeed(auth: AuthState): Promise<FeedPost[]> {
-  const cutoff = getLastTriggerTime().getTime();
-
-  // Backfill accountId for users who logged in before it was stored
-  let accountId = auth.accountId;
-  if (!accountId) {
-    try {
-      const meRes = await fetch(`https://${auth.instance}/api/v1/accounts/verify_credentials`, {
-        headers: { Authorization: `Bearer ${auth.accessToken}` },
-      });
-      if (meRes.ok) {
-        const { id } = await meRes.json() as { id: string };
-        accountId = id;
-        patchAccountId(auth.instance, id);
-      }
-    } catch { /* proceed with home timeline only */ }
-  }
-
-  const [homeRes, ownRes] = await Promise.all([
-    fetch(`https://${auth.instance}/api/v1/timelines/home?limit=40`, {
-      headers: { Authorization: `Bearer ${auth.accessToken}` },
-    }),
-    accountId
-      ? fetch(`https://${auth.instance}/api/v1/accounts/${accountId}/statuses?limit=20&exclude_replies=true`, {
+function triggerArchive(auth: AuthState, statuses: MastodonStatus[]): void {
+  if (!auth.accountId) return;
+  const cutoff = getLastTriggerTime();
+  Promise.allSettled(
+    statuses
+      .filter(s =>
+        s.account.id === auth.accountId &&
+        hasMeenowTag(s) &&
+        s.media_attachments.length > 0 &&
+        new Date(s.created_at) < cutoff
+      )
+      .map(s =>
+        fetch(`https://${auth.instance}/api/v1.1/archive/add/${s.id}`, {
+          method: 'POST',
           headers: { Authorization: `Bearer ${auth.accessToken}` },
         })
-      : Promise.resolve(new Response('[]', { status: 200 })),
-  ]);
+      )
+  );
+}
 
-  const home: MastodonStatus[] = homeRes.ok ? await homeRes.json() as MastodonStatus[] : [];
-  const own: MastodonStatus[] = ownRes.ok ? await ownRes.json() as MastodonStatus[] : [];
+export async function fetchMeenowFeed(auth: AuthState): Promise<FeedPost[]> {
+  const cutoff = getLastTriggerTime().getTime();
+  const statuses = await fetchHomeTimeline(auth);
+  triggerArchive(auth, statuses);
+  const sorted = statuses
+    .filter(s =>
+      new Date(s.created_at).getTime() >= cutoff &&
+      s.media_attachments.length > 0 &&
+      hasMeenowTag(s)
+    )
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-  const seen = new Set<string>();
-  return [...home, ...own]
+  // Cap each account to MAX_POSTS_PER_TRIGGER newest posts to prevent bypassing
+  // the limit by posting directly on Pixelfed with the tag.
+  const seenCount = new Map<string, number>();
+  return sorted
     .filter(s => {
-      if (seen.has(s.id)) return false;
-      seen.add(s.id);
-      return (
-        new Date(s.created_at).getTime() >= cutoff &&
-        s.media_attachments.length > 0 &&
-        s.tags.some(t => t.name.toLowerCase() === 'meenowapp')
-      );
+      const count = seenCount.get(s.account.id) ?? 0;
+      if (count >= MAX_POSTS_PER_TRIGGER) return false;
+      seenCount.set(s.account.id, count + 1);
+      return true;
     })
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .map(toFeedPost);
 }
 
 export async function fetchTodayPostCount(auth: AuthState): Promise<number> {
-  if (!auth.accountId) return 0;
+  const accountId = await resolveAccountId(auth);
+  if (!accountId) return 0;
   const periodStart = getLastTriggerTime().getTime();
   try {
-    const res = await fetch(
-      `https://${auth.instance}/api/v1/accounts/${auth.accountId}/statuses?limit=10&exclude_replies=true`,
-      { headers: { Authorization: `Bearer ${auth.accessToken}` } },
-    );
-    if (!res.ok) return 0;
-    const statuses = await res.json() as MastodonStatus[];
+    const statuses = await fetchHomeTimeline(auth);
     return statuses.filter(s =>
+      s.account.id === accountId &&
       new Date(s.created_at).getTime() >= periodStart &&
-      s.tags.some(t => t.name.toLowerCase() === 'meenowapp'),
+      hasMeenowTag(s)
     ).length;
   } catch {
     return 0;
   }
+}
+
+async function fetchArchivedStatuses(auth: AuthState): Promise<MastodonStatus[]> {
+  try {
+    const res = await fetch(`https://${auth.instance}/api/v1.1/archive/list`, {
+      headers: { Authorization: `Bearer ${auth.accessToken}` },
+    });
+    if (!res.ok) return [];
+    // Pixelfed returns a paginated envelope { data: [...] }; plain arrays are also handled.
+    const json = await res.json() as MastodonStatus[] | { data: MastodonStatus[] };
+    return Array.isArray(json) ? json : (json.data ?? []);
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchMyAllPosts(auth: AuthState): Promise<FeedPost[]> {
+  const accountId = await resolveAccountId(auth);
+  if (!accountId) return [];
+  const url = new URL(`https://${auth.instance}/api/v1/accounts/${accountId}/statuses`);
+  url.searchParams.set('limit', '40');
+  url.searchParams.set('only_media', 'true');
+
+  const [res, archived] = await Promise.all([
+    fetch(url.toString(), { headers: { Authorization: `Bearer ${auth.accessToken}` } }),
+    fetchArchivedStatuses(auth),
+  ]);
+  if (!res.ok) throw new Error(`Fetch failed (${res.status})`);
+  const statuses = await res.json() as MastodonStatus[];
+
+  triggerArchive(auth, statuses);
+
+  const seen = new Set(statuses.map(s => s.id));
+  const merged = [...statuses, ...archived.filter(s => !seen.has(s.id))];
+
+  return merged
+    .filter(s => hasMeenowTag(s) && s.media_attachments.length > 0)
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .map(toFeedPost);
+}
+
+export async function fetchPostContext(auth: AuthState, statusId: string): Promise<PostContext> {
+  const res = await fetch(`https://${auth.instance}/api/v1/statuses/${statusId}/context`, {
+    headers: { Authorization: `Bearer ${auth.accessToken}` },
+  });
+  if (!res.ok) throw new Error(`Context fetch failed (${res.status})`);
+  const raw = await res.json() as { ancestors?: MastodonReply[]; descendants?: MastodonReply[] };
+  return { ancestors: raw.ancestors ?? [], descendants: raw.descendants ?? [] };
+}
+
+export async function postReply(auth: AuthState, inReplyToId: string, content: string): Promise<void> {
+  const res = await fetch(`https://${auth.instance}/api/v1/statuses`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${auth.accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      status: content,
+      in_reply_to_id: inReplyToId,
+      visibility: 'private',
+    }),
+  });
+  if (!res.ok) throw new Error(`Reply failed (${res.status})`);
 }

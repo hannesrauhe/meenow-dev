@@ -1,3 +1,4 @@
+// App entry point: screen mounting/routing, tick loop, overlay navigation (capture, post-detail, grid).
 declare const __GIT_HASH__: string;
 
 import './style.css';
@@ -7,11 +8,17 @@ import { MAX_POSTS_PER_TRIGGER } from './state';
 import { fetchTodayPostCount } from './api/pixelfed';
 import { renderCapture } from './screens/capture';
 import { renderFeed } from './screens/feed';
+import { renderGrid } from './screens/grid';
 import { renderLogin } from './screens/login';
+import { renderPostDetail } from './screens/postDetail';
+import type { FeedPost } from './api/pixelfed';
 import { renderInstallNudge, removeInstallNudge } from './components/installNudge';
+import { renderNotificationNudge, removeNotificationNudge } from './components/notificationNudge';
+import { registerSW } from 'virtual:pwa-register';
 
 const app = document.getElementById('app')!;
-type Screen = AppState | 'login' | 'capturing';
+type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'grid';
+const BASE_SCREENS = new Set<Screen>(['feed', 'awaiting_capture', 'login']);
 let activeScreen: Screen | null = null;
 let tickId: number | null = null;
 
@@ -32,6 +39,34 @@ if (DEV_HOSTNAMES.has(window.location.hostname)) {
   document.body.appendChild(badge);
 }
 
+function showUpdateBanner(updateSW: () => Promise<void>): void {
+  if (document.getElementById('update-nudge')) return;
+  const banner = document.createElement('div');
+  banner.id = 'update-nudge';
+  banner.className = [
+    'fixed top-0 left-0 right-0 z-50',
+    'bg-ink text-cream',
+    'px-5 pt-4 pb-4',
+    'flex items-start gap-4',
+    'border-b border-white/10',
+  ].join(' ');
+  banner.innerHTML = `
+    <div class="flex-1 min-w-0">
+      <p class="text-sm font-medium leading-snug">New version available</p>
+      <p class="text-xs text-cream/55 mt-0.5 leading-snug">Refresh to get the latest update.</p>
+    </div>
+    <button id="btn-update" class="shrink-0 bg-gold text-ink rounded-full px-4 py-1.5 text-sm font-medium">Refresh</button>
+    <button id="btn-dismiss-update" class="shrink-0 text-cream/40 text-xl leading-none" aria-label="Dismiss">&times;</button>
+  `;
+  document.body.appendChild(banner);
+  banner.querySelector('#btn-update')?.addEventListener('click', () => void updateSW());
+  banner.querySelector('#btn-dismiss-update')?.addEventListener('click', () => banner.remove());
+}
+
+const updateSW = registerSW({
+  onNeedRefresh() { showUpdateBanner(updateSW); },
+});
+
 function onPosted(): void {
   periodPostCount = Math.min(periodPostCount + 1, MAX_POSTS_PER_TRIGGER);
 }
@@ -40,24 +75,101 @@ function mountCapture(): void {
   activeScreen = 'capturing';
   app.innerHTML = '';
   removeInstallNudge();
-  app.appendChild(renderCapture(periodPostCount, onPosted, () => { activeScreen = null; }));
+  removeNotificationNudge();
+
+  history.pushState({ screen: 'capturing' }, '');
+
+  const onPopState = () => { activeScreen = null; tick(); };
+  window.addEventListener('popstate', onPopState, { once: true });
+
+  app.appendChild(renderCapture(periodPostCount, onPosted, () => {
+    history.back();
+  }));
+}
+
+function mountPostDetail(post: FeedPost, onClose?: () => void): void {
+  const auth = getAuthState();
+  if (!auth) return;
+  activeScreen = 'post_detail';
+  app.innerHTML = '';
+  removeInstallNudge();
+  removeNotificationNudge();
+
+  history.pushState({ screen: 'post_detail' }, '');
+
+  const returnTo = onClose ?? tick;
+  const onPopState = () => { activeScreen = null; returnTo(); };
+  window.addEventListener('popstate', onPopState, { once: true });
+
+  let el: HTMLElement;
+  try {
+    el = renderPostDetail(post, auth, () => {
+      history.back();
+    });
+  } catch {
+    window.removeEventListener('popstate', onPopState);
+    history.back();
+    activeScreen = null;
+    return;
+  }
+
+  app.appendChild(el);
+}
+
+function mountGrid(): void {
+  const auth = getAuthState();
+  if (!auth) return;
+  activeScreen = 'grid';
+  app.innerHTML = '';
+  removeInstallNudge();
+  removeNotificationNudge();
+
+  history.pushState({ screen: 'grid' }, '');
+
+  let popHandler: (() => void) | null = null;
+
+  const installPop = (): void => {
+    popHandler = () => { popHandler = null; activeScreen = null; tick(); };
+    window.addEventListener('popstate', popHandler, { once: true });
+  };
+
+  const openPost = (post: FeedPost): void => {
+    if (popHandler) { window.removeEventListener('popstate', popHandler); popHandler = null; }
+    mountPostDetail(post, () => {
+      activeScreen = 'grid';
+      app.innerHTML = '';
+      installPop();
+      app.appendChild(renderGrid(auth, openPost, onBack));
+    });
+  };
+
+  const onBack = (): void => {
+    history.back();
+  };
+
+  installPop();
+  app.appendChild(renderGrid(auth, openPost, onBack));
 }
 
 function mount(screen: AppState | 'login'): void {
   app.innerHTML = '';
-  if (screen === 'login') app.appendChild(renderLogin());
-  else if (screen === 'awaiting_capture') {
+  if (screen === 'login') {
+    removeNotificationNudge();
+    app.appendChild(renderLogin());
+    renderInstallNudge();
+  } else if (screen === 'awaiting_capture') {
     removeInstallNudge();
     app.appendChild(renderCapture(periodPostCount, onPosted, () => { activeScreen = null; }));
-    return;
+    void renderNotificationNudge();
   } else {
-    app.appendChild(renderFeed(mountCapture, periodPostCount));
+    app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid));
+    void renderNotificationNudge();
+    renderInstallNudge();
   }
-  renderInstallNudge();
 }
 
 function tick(): void {
-  if (activeScreen === 'capturing') return;
+  if (!BASE_SCREENS.has(activeScreen as Screen) && activeScreen !== null) return;
 
   // Detect when a new trigger period starts while the app is open (e.g. trigger
   // fires at 3 PM while the user is on the countdown after posting twice).

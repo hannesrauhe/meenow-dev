@@ -1,10 +1,11 @@
-import { SLEEPING_CAT } from '../icons';
+// Feed screen: main home feed showing today's meenow posts from followed accounts.
+import { SLEEPING_CAT, SPEECH_BUBBLE_ICON, GRID_ICON } from '../icons';
 import { clearAuth, getAuthState, type AuthState } from '../api/auth';
 import { MAX_POSTS_PER_TRIGGER } from '../state';
 import { fetchMeenowFeed, type FeedPost } from '../api/pixelfed';
-import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime, formatCountdown } from '../timer';
+import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime, formatCountdown, formatRelativeTime } from '../timer';
 
-export function renderFeed(onRequestCapture: () => void, postCount: number): HTMLElement {
+export function renderFeed(onRequestCapture: () => void, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenGrid: () => void): HTMLElement {
   const auth = getAuthState();
   const el = document.createElement('div');
   el.className = 'min-h-dvh flex flex-col bg-cream';
@@ -12,13 +13,13 @@ export function renderFeed(onRequestCapture: () => void, postCount: number): HTM
 
   const header = document.createElement('header');
   header.className = 'sticky top-0 z-10 bg-cream/95 backdrop-blur-sm flex items-center justify-between px-5 py-4 border-b border-ink/10';
-  const count = postCount;
-  const atQuota = count >= MAX_POSTS_PER_TRIGGER;
+  const atQuota = postCount >= MAX_POSTS_PER_TRIGGER;
   header.innerHTML = `
     <h1 class="text-xl font-semibold tracking-tight text-ink">meenow</h1>
     <div class="flex items-center gap-3">
       ${!atQuota ? `<button id="btn-post-again" class="text-sm font-semibold text-gold">+ Post</button>` : ''}
-      <span id="header-status" class="text-xs text-ink/40">${!atQuota ? `${count}/${MAX_POSTS_PER_TRIGGER} posted` : ''}</span>
+      <span id="header-status" class="text-xs text-ink/40">${!atQuota ? `${postCount}/${MAX_POSTS_PER_TRIGGER} posted` : ''}</span>
+      <button id="btn-open-grid" class="w-6 h-6 text-ink/50 hover:text-ink transition-colors" aria-label="My Photos">${GRID_ICON}</button>
     </div>
   `;
 
@@ -44,6 +45,11 @@ export function renderFeed(onRequestCapture: () => void, postCount: number): HTM
   const footer = document.createElement('footer');
   footer.className = 'py-6 text-center text-xs text-ink/25 space-y-2';
 
+  const visibility = document.createElement('p');
+  visibility.className = 'text-ink/40';
+  visibility.textContent = "Your followers can see today’s posts in meenow and on Pixelfed";
+  footer.appendChild(visibility);
+
   const credit = document.createElement('p');
   credit.innerHTML = `Meenow is an experimental side project by <a href="https://rauhe.eu" target="_blank" rel="noopener noreferrer" class="underline underline-offset-2">Hannes Rauhe</a>`;
   footer.appendChild(credit);
@@ -62,24 +68,14 @@ export function renderFeed(onRequestCapture: () => void, postCount: number): HTM
 
   el.appendChild(footer);
 
-  header.querySelector('#btn-post-again')?.addEventListener('click', () => {
-    onRequestCapture();
-  });
+  header.querySelector('#btn-post-again')?.addEventListener('click', onRequestCapture);
+  header.querySelector('#btn-open-grid')?.addEventListener('click', onOpenGrid);
 
-  loadFeed(content, auth, postCount);
+  if (auth) loadFeed(content, auth, postCount, onOpenPost);
   return el;
 }
 
-function formatRelativeTime(d: Date): string {
-  const ms = Date.now() - d.getTime();
-  const m = Math.floor(ms / 60_000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
-  return `${Math.floor(m / 60)}h ago`;
-}
-
-async function loadFeed(container: HTMLElement, auth: AuthState | null, postCount: number): Promise<void> {
-  if (!auth) return;
+async function loadFeed(container: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void): Promise<void> {
 
   container.innerHTML = `
     <div class="flex items-center justify-center py-20">
@@ -97,7 +93,7 @@ async function loadFeed(container: HTMLElement, auth: AuthState | null, postCoun
         <button id="btn-feed-retry" class="text-sm text-gold underline underline-offset-2">Retry</button>
       </div>
     `;
-    container.querySelector('#btn-feed-retry')?.addEventListener('click', () => loadFeed(container, auth, postCount));
+    container.querySelector('#btn-feed-retry')?.addEventListener('click', () => loadFeed(container, auth, postCount, onOpenPost));
     return;
   }
 
@@ -114,10 +110,10 @@ async function loadFeed(container: HTMLElement, auth: AuthState | null, postCoun
   }
 
   const unblurred = postCount > 0;
-  posts.forEach(post => container.appendChild(makePostCard(post, unblurred)));
+  posts.forEach(post => container.appendChild(makePostCard(post, unblurred, onOpenPost)));
 }
 
-function makePostCard(post: FeedPost, unblurred: boolean): HTMLElement {
+function makePostCard(post: FeedPost, unblurred: boolean, onOpenPost: (post: FeedPost) => void): HTMLElement {
   const card = document.createElement('article');
   card.className = 'border-b border-ink/8';
 
@@ -167,18 +163,41 @@ function makePostCard(post: FeedPost, unblurred: boolean): HTMLElement {
     overlay.appendChild(label);
     imgWrapper.appendChild(overlay);
   } else {
-    if (post.allMediaUrls.length > 1) {
-      const badge = document.createElement('a');
-      badge.href = post.url;
-      badge.target = '_blank';
-      badge.rel = 'noopener noreferrer';
-      badge.className = 'absolute top-3 right-3 bg-black/40 text-white text-xs px-2.5 py-1 rounded-full backdrop-blur-sm';
-      badge.textContent = `${post.allMediaUrls.length} photos`;
-      imgWrapper.appendChild(badge);
-    }
-    imgWrapper.addEventListener('click', () => window.open(post.url, '_blank', 'noopener,noreferrer'));
+    imgWrapper.addEventListener('click', () => onOpenPost(post));
   }
 
   card.appendChild(imgWrapper);
+
+  if (post.statusText || post.location) {
+    const meta = document.createElement('div');
+    meta.className = 'px-4 pt-2 pb-1 flex flex-col gap-2';
+    if (post.statusText) {
+      const textEl = document.createElement('p');
+      textEl.className = 'text-sm text-ink leading-relaxed whitespace-pre-line';
+      textEl.textContent = post.statusText;
+      meta.appendChild(textEl);
+    }
+    if (post.location) {
+      const pill = document.createElement('span');
+      pill.className = 'inline-block text-xs text-gold border border-gold/30 rounded-full px-3 py-1.5';
+      pill.textContent = `📍 ${post.location}`;
+      meta.appendChild(pill);
+    }
+    card.appendChild(meta);
+  }
+
+  if (post.replyCount > 0) {
+    const cardFooter = document.createElement('div');
+    cardFooter.className = 'flex items-center gap-1.5 px-4 py-2.5 text-xs text-ink/40';
+    const iconEl = document.createElement('span');
+    iconEl.className = 'w-3.5 h-3.5 shrink-0';
+    iconEl.innerHTML = SPEECH_BUBBLE_ICON;
+    cardFooter.appendChild(iconEl);
+    const countEl = document.createElement('span');
+    countEl.textContent = `${post.replyCount}`;
+    cardFooter.appendChild(countEl);
+    card.appendChild(cardFooter);
+  }
+
   return card;
 }
