@@ -27,7 +27,7 @@ export default defineConfig(({ command }) => {
     },
     plugins: [
       VitePWA({
-        registerType: 'autoUpdate',
+        registerType: 'prompt',
         strategies: 'injectManifest',
         srcDir: 'src',
         filename: 'sw.ts',

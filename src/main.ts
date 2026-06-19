@@ -12,6 +12,7 @@ import { renderPostDetail } from './screens/postDetail';
 import type { FeedPost } from './api/pixelfed';
 import { renderInstallNudge, removeInstallNudge } from './components/installNudge';
 import { renderNotificationNudge, removeNotificationNudge } from './components/notificationNudge';
+import { registerSW } from 'virtual:pwa-register';
 
 const app = document.getElementById('app')!;
 type Screen = AppState | 'login' | 'capturing' | 'post_detail';
@@ -34,6 +35,34 @@ if (DEV_HOSTNAMES.has(window.location.hostname)) {
   badge.className = 'fixed bottom-3 right-3 bg-gold text-white text-xs font-semibold px-2 py-0.5 rounded-full z-50 opacity-75 pointer-events-none select-none';
   document.body.appendChild(badge);
 }
+
+function showUpdateBanner(updateSW: () => Promise<void>): void {
+  if (document.getElementById('update-nudge')) return;
+  const banner = document.createElement('div');
+  banner.id = 'update-nudge';
+  banner.className = [
+    'fixed top-0 left-0 right-0 z-50',
+    'bg-ink text-cream',
+    'px-5 pt-4 pb-4',
+    'flex items-start gap-4',
+    'border-b border-white/10',
+  ].join(' ');
+  banner.innerHTML = `
+    <div class="flex-1 min-w-0">
+      <p class="text-sm font-medium leading-snug">New version available</p>
+      <p class="text-xs text-cream/55 mt-0.5 leading-snug">Refresh to get the latest update.</p>
+    </div>
+    <button id="btn-update" class="shrink-0 bg-gold text-ink rounded-full px-4 py-1.5 text-sm font-medium">Refresh</button>
+    <button id="btn-dismiss-update" class="shrink-0 text-cream/40 text-xl leading-none" aria-label="Dismiss">&times;</button>
+  `;
+  document.body.appendChild(banner);
+  banner.querySelector('#btn-update')?.addEventListener('click', () => void updateSW());
+  banner.querySelector('#btn-dismiss-update')?.addEventListener('click', () => banner.remove());
+}
+
+const updateSW = registerSW({
+  onNeedRefresh() { showUpdateBanner(updateSW); },
+});
 
 function onPosted(): void {
   periodPostCount = Math.min(periodPostCount + 1, MAX_POSTS_PER_TRIGGER);
