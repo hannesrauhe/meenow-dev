@@ -16,6 +16,9 @@ async function fetchNextPage(auth: AuthState): Promise<void> {
   _cursor = cursor;
 }
 
+// Fetches pages until the oldest cached post predates targetDate (or the server
+// is exhausted). Relies on max_id pagination returning posts newest-first so
+// _myPosts[last] is always the oldest entry.
 async function ensureLoadedUpTo(auth: AuthState, targetDate: Date): Promise<void> {
   while (
     _cursor !== null &&
@@ -53,6 +56,7 @@ export function renderArchive(
   header.className = 'sticky top-0 z-10 bg-cream/95 backdrop-blur-sm flex items-center gap-3 px-4 py-4 border-b border-ink/10';
   const backBtn = document.createElement('button');
   backBtn.className = 'w-6 h-6 text-ink/60 shrink-0';
+  backBtn.setAttribute('aria-label', 'Back to feed');
   backBtn.innerHTML = CHEVRON_LEFT_ICON;
   backBtn.addEventListener('click', onBack);
   const title = document.createElement('h1');
@@ -88,9 +92,8 @@ export function renderArchive(
   el.appendChild(content);
 
   function updateNavButtons(): void {
-    const todayYear = new Date().getFullYear();
-    const todayMonth = new Date().getMonth();
-    const isCurrentMonth = currentYear === todayYear && currentMonth === todayMonth;
+    const today = new Date();
+    const isCurrentMonth = currentYear === today.getFullYear() && currentMonth === today.getMonth();
     nextBtn.disabled = isCurrentMonth;
 
     const firstDayOfMonth = new Date(currentYear, currentMonth, 1);
