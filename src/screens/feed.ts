@@ -45,6 +45,11 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
   const footer = document.createElement('footer');
   footer.className = 'py-6 text-center text-xs text-ink/25 space-y-2';
 
+  const visibility = document.createElement('p');
+  visibility.className = 'text-ink/40';
+  visibility.textContent = "Your followers can see today’s posts in meenow and on Pixelfed";
+  footer.appendChild(visibility);
+
   const credit = document.createElement('p');
   credit.innerHTML = `Meenow is an experimental side project by <a href="https://rauhe.eu" target="_blank" rel="noopener noreferrer" class="underline underline-offset-2">Hannes Rauhe</a>`;
   footer.appendChild(credit);
