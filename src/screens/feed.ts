@@ -1,10 +1,10 @@
-import { SLEEPING_CAT, SPEECH_BUBBLE_ICON } from '../icons';
+import { SLEEPING_CAT, SPEECH_BUBBLE_ICON, GRID_ICON } from '../icons';
 import { clearAuth, getAuthState, type AuthState } from '../api/auth';
 import { MAX_POSTS_PER_TRIGGER } from '../state';
 import { fetchMeenowFeed, type FeedPost } from '../api/pixelfed';
 import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime, formatCountdown, formatRelativeTime } from '../timer';
 
-export function renderFeed(onRequestCapture: () => void, postCount: number, onOpenPost: (post: FeedPost) => void): HTMLElement {
+export function renderFeed(onRequestCapture: () => void, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenGrid: () => void): HTMLElement {
   const auth = getAuthState();
   const el = document.createElement('div');
   el.className = 'min-h-dvh flex flex-col bg-cream';
@@ -18,6 +18,7 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
     <div class="flex items-center gap-3">
       ${!atQuota ? `<button id="btn-post-again" class="text-sm font-semibold text-gold">+ Post</button>` : ''}
       <span id="header-status" class="text-xs text-ink/40">${!atQuota ? `${postCount}/${MAX_POSTS_PER_TRIGGER} posted` : ''}</span>
+      <button id="btn-open-grid" class="w-6 h-6 text-ink/50 hover:text-ink transition-colors" aria-label="My Photos">${GRID_ICON}</button>
     </div>
   `;
 
@@ -62,6 +63,7 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
   el.appendChild(footer);
 
   header.querySelector('#btn-post-again')?.addEventListener('click', onRequestCapture);
+  header.querySelector('#btn-open-grid')?.addEventListener('click', onOpenGrid);
 
   if (auth) loadFeed(content, auth, postCount, onOpenPost);
   return el;

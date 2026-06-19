@@ -7,6 +7,7 @@ import { MAX_POSTS_PER_TRIGGER } from './state';
 import { fetchTodayPostCount } from './api/pixelfed';
 import { renderCapture } from './screens/capture';
 import { renderFeed } from './screens/feed';
+import { renderGrid } from './screens/grid';
 import { renderLogin } from './screens/login';
 import { renderPostDetail } from './screens/postDetail';
 import type { FeedPost } from './api/pixelfed';
@@ -15,7 +16,8 @@ import { renderNotificationNudge, removeNotificationNudge } from './components/n
 import { registerSW } from 'virtual:pwa-register';
 
 const app = document.getElementById('app')!;
-type Screen = AppState | 'login' | 'capturing' | 'post_detail';
+type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'grid';
+const BASE_SCREENS = new Set<Screen>(['feed', 'awaiting_capture', 'login']);
 let activeScreen: Screen | null = null;
 let tickId: number | null = null;
 
@@ -87,7 +89,7 @@ function mountCapture(): void {
   }));
 }
 
-function mountPostDetail(post: FeedPost): void {
+function mountPostDetail(post: FeedPost, onClose?: () => void): void {
   const auth = getAuthState();
   if (!auth) return;
   activeScreen = 'post_detail';
@@ -97,7 +99,8 @@ function mountPostDetail(post: FeedPost): void {
 
   history.pushState({ screen: 'post_detail' }, '');
 
-  const onPopState = () => { activeScreen = null; tick(); };
+  const returnTo = onClose ?? tick;
+  const onPopState = () => { activeScreen = null; returnTo(); };
   window.addEventListener('popstate', onPopState, { once: true });
 
   let el: HTMLElement;
@@ -106,7 +109,7 @@ function mountPostDetail(post: FeedPost): void {
       window.removeEventListener('popstate', onPopState);
       history.back();
       activeScreen = null;
-      tick();
+      returnTo();
     });
   } catch {
     window.removeEventListener('popstate', onPopState);
@@ -116,6 +119,44 @@ function mountPostDetail(post: FeedPost): void {
   }
 
   app.appendChild(el);
+}
+
+function mountGrid(): void {
+  const auth = getAuthState();
+  if (!auth) return;
+  activeScreen = 'grid';
+  app.innerHTML = '';
+  removeInstallNudge();
+  removeNotificationNudge();
+
+  history.pushState({ screen: 'grid' }, '');
+
+  let popHandler: (() => void) | null = null;
+
+  const installPop = (): void => {
+    popHandler = () => { popHandler = null; activeScreen = null; tick(); };
+    window.addEventListener('popstate', popHandler, { once: true });
+  };
+
+  const openPost = (post: FeedPost): void => {
+    if (popHandler) { window.removeEventListener('popstate', popHandler); popHandler = null; }
+    mountPostDetail(post, () => {
+      activeScreen = 'grid';
+      app.innerHTML = '';
+      installPop();
+      app.appendChild(renderGrid(auth, openPost, onBack));
+    });
+  };
+
+  const onBack = (): void => {
+    if (popHandler) { window.removeEventListener('popstate', popHandler); popHandler = null; }
+    history.back();
+    activeScreen = null;
+    tick();
+  };
+
+  installPop();
+  app.appendChild(renderGrid(auth, openPost, onBack));
 }
 
 function mount(screen: AppState | 'login'): void {
@@ -129,15 +170,14 @@ function mount(screen: AppState | 'login'): void {
     app.appendChild(renderCapture(periodPostCount, onPosted, () => { activeScreen = null; }));
     void renderNotificationNudge();
   } else {
-    app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail));
+    app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid));
     void renderNotificationNudge();
     renderInstallNudge();
   }
 }
 
 function tick(): void {
-  if (activeScreen === 'capturing') return;
-  if (activeScreen === 'post_detail') return;
+  if (!BASE_SCREENS.has(activeScreen as Screen) && activeScreen !== null) return;
 
   // Detect when a new trigger period starts while the app is open (e.g. trigger
   // fires at 3 PM while the user is on the countdown after posting twice).
