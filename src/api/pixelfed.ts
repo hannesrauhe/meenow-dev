@@ -308,6 +308,18 @@ export async function fetchMyAllPosts(auth: AuthState): Promise<FeedPost[]> {
   if (!res.ok) throw new Error(`Fetch failed (${res.status})`);
   const statuses = await res.json() as MastodonStatus[];
 
+  const cutoff = getLastTriggerTime();
+  Promise.allSettled(
+    statuses
+      .filter(s => hasMeenowTag(s) && s.media_attachments.length > 0 && new Date(s.created_at) < cutoff)
+      .map(s =>
+        fetch(`https://${auth.instance}/api/v1.1/archive/add/${s.id}`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${auth.accessToken}` },
+        })
+      )
+  );
+
   const seen = new Set(statuses.map(s => s.id));
   const merged = [...statuses, ...archived.filter(s => !seen.has(s.id))];
 
