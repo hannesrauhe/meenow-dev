@@ -286,7 +286,9 @@ async function fetchArchivedStatuses(auth: AuthState): Promise<MastodonStatus[]>
       headers: { Authorization: `Bearer ${auth.accessToken}` },
     });
     if (!res.ok) return [];
-    return await res.json() as MastodonStatus[];
+    // Pixelfed returns a paginated envelope { data: [...] }; plain arrays are also handled.
+    const json = await res.json() as MastodonStatus[] | { data: MastodonStatus[] };
+    return Array.isArray(json) ? json : (json.data ?? []);
   } catch {
     return [];
   }
