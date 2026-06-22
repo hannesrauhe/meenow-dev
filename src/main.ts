@@ -15,6 +15,9 @@ import type { FeedPost } from './api/pixelfed';
 import { renderInstallNudge, removeInstallNudge } from './components/installNudge';
 import { renderNotificationNudge, removeNotificationNudge } from './components/notificationNudge';
 import { registerSW } from 'virtual:pwa-register';
+import { idbSet } from './idb';
+import { isPwaInstalled, isPwaSubbed } from './state';
+import { resubscribeAsPwa } from './notifications';
 
 const app = document.getElementById('app')!;
 type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'grid';
@@ -68,6 +71,9 @@ const updateSW = registerSW({
 });
 
 function onPosted(): void {
+  if (periodPostCount === 0) {
+    void idbSet('posted-trigger-ms', getLastTriggerTime().getTime());
+  }
   periodPostCount = Math.min(periodPostCount + 1, MAX_POSTS_PER_TRIGGER);
 }
 
@@ -196,6 +202,12 @@ async function init(): Promise<void> {
     }
   }
 
+  // On first launch as an installed PWA, silently re-subscribe so notifications
+  // are routed to the app instead of Chrome.
+  if (isPwaInstalled() && Notification.permission === 'granted' && !isPwaSubbed()) {
+    void resubscribeAsPwa();
+  }
+
   // Fetch the authoritative post count for the current trigger period from the
   // server before starting the tick loop. This ensures multi-device state is
   // correct from the first render without any localStorage synchronisation logic.
@@ -208,6 +220,9 @@ async function init(): Promise<void> {
     `;
     try {
       periodPostCount = Math.min(await fetchTodayPostCount(auth), MAX_POSTS_PER_TRIGGER);
+      if (periodPostCount > 0) {
+        void idbSet('posted-trigger-ms', getLastTriggerTime().getTime());
+      }
     } catch {
       periodPostCount = 0;
     }
