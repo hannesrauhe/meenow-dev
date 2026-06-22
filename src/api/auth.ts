@@ -1,4 +1,6 @@
 // OAuth PKCE auth: client registration, login flow, token/accountId storage, and auth state helpers.
+import { clearPushSubFilename } from '../state';
+
 const PREFIX = 'meenow:auth:';
 
 export interface AuthState {
@@ -125,4 +127,6 @@ export function clearAuth(): void {
   localStorage.removeItem(`${PREFIX}instance`);
   localStorage.removeItem(`${PREFIX}pending-instance`);
   localStorage.removeItem(`${PREFIX}verifier`);
+  clearPushSubFilename();
+  localStorage.removeItem('meenow:pwa-subbed');
 }

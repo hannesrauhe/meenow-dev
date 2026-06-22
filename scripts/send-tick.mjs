@@ -22,11 +22,12 @@ for (const file of readdirSync(subsDir).filter(f => f.endsWith('.json'))) {
     console.log(`Sent to ${file}`);
   } catch (err) {
     // 404/410 = subscription expired or unregistered; 400 can also signal expiry on some push services
-    if (err.statusCode === 410 || err.statusCode === 404 || err.statusCode === 400) {
+    if (err instanceof Error && 'statusCode' in err &&
+        (err.statusCode === 410 || err.statusCode === 404 || err.statusCode === 400)) {
       rmSync(`${subsDir}/${file}`);
       expired.push(file);
     } else {
-      console.error(`Failed ${file}: ${err.statusCode} ${err.message}`);
+      console.error(`Failed ${file}:`, err);
     }
   }
 }

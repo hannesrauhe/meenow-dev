@@ -21,7 +21,6 @@ export default defineConfig(({ command }) => {
   }
 
   return {
-    base: '/',
     define: {
       __GIT_HASH__: JSON.stringify(GIT_HASH),
     },

@@ -1,10 +1,10 @@
 // Capture screen: dual-camera photo capture flow (back camera then selfie), composite stitching, preview with optional caption/location, and post submission.
 import { MAX_POSTS_PER_TRIGGER } from '../state';
-
-const CAMERA_SWITCH_DELAY_MS = 600; // browser needs time to release back camera before front opens
 import { getAuthState } from '../api/auth';
 import { postMeenow } from '../api/pixelfed';
 import { CAT_EARS_SHUTTER } from '../icons';
+
+const CAMERA_SWITCH_DELAY_MS = 600; // browser needs time to release back camera before front opens
 
 type Step = 'start' | 'back' | 'switching' | 'front' | 'preview' | 'uploading' | 'error';
 
@@ -164,7 +164,7 @@ function cameraErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Could not access camera.';
 }
 
-export function renderCapture(postCount: number, onPosted: () => void, onDone?: () => void): HTMLElement {
+export function renderCapture(postCount: number, onPosted: () => void, onDone: () => void): HTMLElement {
   const root = document.createElement('div');
   root.id = 'screen-capture';
 
@@ -412,7 +412,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone?: 
       statusText = '';
       locationText = '';
       onPosted();
-      onDone?.();
+      onDone();
     } catch (err) {
       show('error', err instanceof Error ? err.message : 'Upload failed.');
     }
