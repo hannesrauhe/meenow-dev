@@ -82,14 +82,7 @@ export function getNextTriggerTime(): Date {
   return getTriggerForDate(tomorrow);
 }
 
-export type AppState = 'awaiting_capture' | 'feed';
-
-// postCount: number of posts made in the current trigger period (fetched from server on load).
-//            0 posts → awaiting_capture regardless of time of day (no trigger gate).
-export function computeState(postCount: number): AppState {
-  if (postCount === 0) return 'awaiting_capture';
-  return 'feed';
-}
+export type AppState = 'feed';
 
 export function formatCountdown(ms: number): string {
   const totalSec = Math.max(0, Math.floor(ms / 1000));
