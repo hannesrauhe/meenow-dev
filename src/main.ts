@@ -5,7 +5,7 @@ import './style.css';
 import { getAuthState, handleOAuthCallback } from './api/auth';
 import { getLastTriggerTime, type AppState } from './timer';
 import { MAX_POSTS_PER_TRIGGER } from './state';
-import { fetchTodayPostCount } from './api/pixelfed';
+import { fetchTodayPostCount, deletePost, removePostFromCache } from './api/pixelfed';
 import { renderCapture } from './screens/capture';
 import { renderFeed } from './screens/feed';
 import { renderGrid } from './screens/grid';
@@ -107,11 +107,17 @@ function mountPostDetail(post: FeedPost, onClose?: () => void): void {
   const onPopState = () => { activeScreen = null; returnTo(); };
   window.addEventListener('popstate', onPopState, { once: true });
 
+  const onDeletePost = async (): Promise<void> => {
+    await deletePost(auth, post.id);
+    removePostFromCache(post.id);
+    history.back();
+  };
+
   let el: HTMLElement;
   try {
     el = renderPostDetail(post, auth, () => {
       history.back();
-    });
+    }, onDeletePost);
   } catch {
     window.removeEventListener('popstate', onPopState);
     history.back();
