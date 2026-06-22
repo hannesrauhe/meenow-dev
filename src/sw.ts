@@ -48,6 +48,6 @@ self.addEventListener('notificationclick', event => {
         if ('focus' in client) { client.focus(); return; }
       }
       return self.clients.openWindow('/');
-    })
+    }).catch(err => console.error('[sw] notificationclick failed', err))
   );
 });

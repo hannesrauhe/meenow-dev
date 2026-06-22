@@ -65,7 +65,7 @@ export interface MastodonReply {
   content: string;
 }
 
-export interface PostContext {
+interface PostContext {
   ancestors: MastodonReply[];
   descendants: MastodonReply[];
 }
@@ -321,7 +321,7 @@ export async function fetchMyAllPosts(auth: AuthState): Promise<FeedPost[]> {
   const accountId = await resolveAccountId(auth);
   if (!accountId) return [];
   const url = new URL(`https://${auth.instance}/api/v1/accounts/${accountId}/statuses`);
-  url.searchParams.set('limit', '40');
+  url.searchParams.set('limit', String(HOME_TIMELINE_LIMIT));
   url.searchParams.set('only_media', 'true');
 
   const [res, archived] = await Promise.all([

@@ -9,8 +9,6 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
-        with:
-          path: .
 
       - uses: actions/checkout@v5
         with:
