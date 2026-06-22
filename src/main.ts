@@ -3,7 +3,7 @@ declare const __GIT_HASH__: string;
 
 import './style.css';
 import { getAuthState, handleOAuthCallback } from './api/auth';
-import { getLastTriggerTime, computeState, type AppState } from './timer';
+import { getLastTriggerTime, type AppState } from './timer';
 import { MAX_POSTS_PER_TRIGGER } from './state';
 import { fetchTodayPostCount } from './api/pixelfed';
 import { renderCapture } from './screens/capture';
@@ -18,7 +18,7 @@ import { registerSW } from 'virtual:pwa-register';
 
 const app = document.getElementById('app')!;
 type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'grid';
-const BASE_SCREENS = new Set<Screen>(['feed', 'awaiting_capture', 'login']);
+const BASE_SCREENS = new Set<Screen>(['feed', 'login']);
 let activeScreen: Screen | null = null;
 let tickId: number | null = null;
 
@@ -157,10 +157,6 @@ function mount(screen: AppState | 'login'): void {
     removeNotificationNudge();
     app.appendChild(renderLogin());
     renderInstallNudge();
-  } else if (screen === 'awaiting_capture') {
-    removeInstallNudge();
-    app.appendChild(renderCapture(periodPostCount, onPosted, () => { activeScreen = null; }));
-    void renderNotificationNudge();
   } else {
     app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid));
     void renderNotificationNudge();
@@ -180,7 +176,7 @@ function tick(): void {
   }
 
   const auth = getAuthState();
-  const screen: AppState | 'login' = auth ? computeState(periodPostCount) : 'login';
+  const screen: AppState | 'login' = auth ? 'feed' : 'login';
 
   if ((screen as Screen) !== activeScreen) {
     activeScreen = screen;
