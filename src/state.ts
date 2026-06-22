@@ -21,6 +21,21 @@ export function setPushSubFilename(filename: string): void {
   localStorage.setItem('meenow:push-sub-file', filename);
 }
 
+export function clearPushSubFilename(): void {
+  localStorage.removeItem('meenow:push-sub-file');
+}
+
+// Set when the active push subscription was created in PWA standalone mode.
+// Until this is set, the subscription was created in a browser tab and Chrome
+// routes its notifications to Chrome rather than to the installed PWA.
+export function isPwaSubbed(): boolean {
+  return localStorage.getItem('meenow:pwa-subbed') === 'true';
+}
+
+export function setPwaSubbed(): void {
+  localStorage.setItem('meenow:pwa-subbed', 'true');
+}
+
 export function isInstallDismissed(): boolean {
   const raw = localStorage.getItem('meenow:install-dismiss');
   if (!raw) return false;

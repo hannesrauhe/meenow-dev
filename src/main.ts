@@ -16,6 +16,8 @@ import { renderInstallNudge, removeInstallNudge } from './components/installNudg
 import { renderNotificationNudge, removeNotificationNudge } from './components/notificationNudge';
 import { registerSW } from 'virtual:pwa-register';
 import { idbSet } from './idb';
+import { isPwaInstalled, isPwaSubbed } from './state';
+import { resubscribeAsPwa } from './notifications';
 
 const app = document.getElementById('app')!;
 type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'grid';
@@ -198,6 +200,12 @@ async function init(): Promise<void> {
     } catch (err) {
       console.error('OAuth callback error:', err);
     }
+  }
+
+  // On first launch as an installed PWA, silently re-subscribe so notifications
+  // are routed to the app instead of Chrome.
+  if (isPwaInstalled() && Notification.permission === 'granted' && !isPwaSubbed()) {
+    void resubscribeAsPwa();
   }
 
   // Fetch the authoritative post count for the current trigger period from the

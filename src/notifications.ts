@@ -1,5 +1,5 @@
 // Push notifications: VAPID subscription registration, permission request, and relay-repo subscription management.
-import { getPushSubFilename, setPushSubFilename } from './state';
+import { getPushSubFilename, setPushSubFilename, clearPushSubFilename, isPwaInstalled, setPwaSubbed } from './state';
 
 // These are injected at build time from GitHub repo secrets (VITE_* prefix).
 // Each deployed instance (dev.meenow.de, meenow.de) has its own secret values,
@@ -78,5 +78,47 @@ export async function enableNotifications(): Promise<'granted' | 'denied' | 'err
   }
 
   setPushSubFilename(filename);
+  if (isPwaInstalled()) setPwaSubbed();
   return 'granted';
+}
+
+// On first launch as an installed PWA, the existing push subscription was
+// created in a browser tab — Chrome routes its notifications to Chrome rather
+// than to the PWA. Unsubscribe and re-subscribe so the new subscription is
+// associated with the standalone context, which makes Android attribute
+// notifications to the installed app instead.
+export async function resubscribeAsPwa(): Promise<void> {
+  if (!VAPID_PUBLIC_KEY || !PUSH_RELAY_TOKEN || !PUSH_SUBS_PATH) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const existing = await reg.pushManager.getSubscription();
+    if (existing) await existing.unsubscribe();
+
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+    });
+
+    clearPushSubFilename();
+    const filename = `${PUSH_SUBS_PATH}/${crypto.randomUUID()}.json`;
+    const content = btoa(JSON.stringify(sub.toJSON()));
+    const res = await fetch(
+      `https://api.github.com/repos/${PUSH_RELAY_REPO}/contents/${filename}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${PUSH_RELAY_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message: 'Add subscription', content }),
+      }
+    );
+
+    if (res.ok) {
+      setPushSubFilename(filename);
+      setPwaSubbed();
+    }
+  } catch {
+    // Silent failure — will retry on the next launch.
+  }
 }
