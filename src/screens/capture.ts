@@ -287,6 +287,8 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone?: 
     try {
       await openCamera(video, 'user');
       applyViewfinderTransform(video);
+      const t = video.style.transform;
+      video.style.transform = t ? `${t} scaleX(-1)` : 'scaleX(-1)';
     } catch (err) {
       show('error', cameraErrorMessage(err));
       return;
