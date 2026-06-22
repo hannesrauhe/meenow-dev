@@ -7,11 +7,11 @@ export default {
   theme: {
     extend: {
       colors: {
-        cream: '#FDFBF7',
-        ink: '#2D2D2D',
-        'ink-muted': '#5A5A5A',
-        gold: '#C9A96E',
-        'gold-light': '#E8D5B0',
+        cream: 'rgb(var(--color-cream) / <alpha-value>)',
+        ink: 'rgb(var(--color-ink) / <alpha-value>)',
+        'ink-muted': 'rgb(var(--color-ink-muted) / <alpha-value>)',
+        gold: 'rgb(var(--color-gold) / <alpha-value>)',
+        'gold-light': 'rgb(var(--color-gold-light) / <alpha-value>)',
       },
       fontFamily: {
         sans: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'system-ui', 'sans-serif'],

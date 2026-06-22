@@ -25,7 +25,7 @@ export function renderLogin(): HTMLElement {
           autocorrect="off"
           spellcheck="false"
           placeholder="pixelfed.social"
-          class="w-full bg-white border border-ink/15 rounded-xl px-4 py-3
+          class="w-full bg-cream border border-ink/15 rounded-xl px-4 py-3
                  text-ink placeholder:text-ink/30 text-base
                  focus:outline-none focus:border-gold transition-colors"
         />
