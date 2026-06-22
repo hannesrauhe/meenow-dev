@@ -95,7 +95,7 @@ export function renderPostDetail(
 
   const replyInput = document.createElement('textarea');
   replyInput.id = 'reply-input';
-  replyInput.className = 'flex-1 resize-none rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm text-ink placeholder:text-ink/35 focus:outline-none focus:border-gold/60 min-h-[40px] max-h-32';
+  replyInput.className = 'flex-1 resize-none rounded-xl border border-ink/20 bg-cream px-3 py-2 text-sm text-ink placeholder:text-ink/35 focus:outline-none focus:border-gold/60 min-h-[40px] max-h-32';
   replyInput.placeholder = 'Add a reply…';
   replyInput.rows = 1;
   replyBar.appendChild(replyInput);
