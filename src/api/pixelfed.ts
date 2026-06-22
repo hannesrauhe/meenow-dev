@@ -45,6 +45,7 @@ export interface FeedPost {
   statusText: string;
   location: string;
   account: {
+    id: string;
     displayName: string;
     username: string;
     avatarUrl: string;
@@ -231,6 +232,7 @@ function toFeedPost(s: MastodonStatus): FeedPost {
     statusText: caption,
     location,
     account: {
+      id: s.account.id,
       displayName: s.account.display_name || s.account.username,
       username: s.account.username,
       avatarUrl: s.account.avatar,
@@ -363,4 +365,18 @@ export async function postReply(auth: AuthState, inReplyToId: string, content: s
     }),
   });
   if (!res.ok) throw new Error(`Reply failed (${res.status})`);
+}
+
+export async function deletePost(auth: AuthState, statusId: string): Promise<void> {
+  const res = await fetch(`https://${auth.instance}/api/v1/statuses/${statusId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${auth.accessToken}` },
+  });
+  if (!res.ok) throw new Error(`Delete failed (${res.status})`);
+}
+
+export function removePostFromCache(postId: string): void {
+  if (_homeCache) {
+    _homeCache.statuses = _homeCache.statuses.filter(s => s.id !== postId);
+  }
 }
