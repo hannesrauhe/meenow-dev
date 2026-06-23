@@ -1,21 +1,13 @@
-// Service worker: Workbox precache/route and push-notification handler (shows notification only near the daily trigger time).
+// Service worker: Workbox precache/route and push-notification handler.
 import { precacheAndRoute } from 'workbox-precaching';
 import { getLastTriggerTime } from './timer';
+import { idbGet } from './idb';
 
 declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ revision: string | null; url: string }>;
 };
 
 precacheAndRoute(self.__WB_MANIFEST);
-
-// How long after a trigger fires the SW will still show a notification.
-// Matches the GitHub Actions cron interval so every tick lands in at most one window.
-const NOTIFICATION_WINDOW_MS = 30 * 60 * 1000;
-
-// In-memory dedup: prevents showing the same notification twice within a session.
-// Resets if the SW is terminated and restarted — acceptable because the window
-// will usually have expired before the next push arrives.
-let lastNotifiedTriggerMs = 0;
 
 self.addEventListener('message', (event: ExtendableMessageEvent) => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
@@ -26,19 +18,25 @@ self.addEventListener('push', event => {
   const now = Date.now();
   const triggerMs = getLastTriggerTime().getTime();
 
-  if (!data.force) {
-    if (now < triggerMs || now > triggerMs + NOTIFICATION_WINDOW_MS) return;
-    if (lastNotifiedTriggerMs >= triggerMs) return;
-  }
-  lastNotifiedTriggerMs = triggerMs;
+  // Skip ticks that arrive before the trigger (clock skew / early delivery).
+  if (now < triggerMs && !data.force) return;
+
+  // Notify on every tick unless the user has already posted in this period.
+  // idbGet reads the timestamp written by the app after a successful post.
+  const shouldNotify = data.force
+    ? Promise.resolve(true)
+    : idbGet('posted-trigger-ms').then(posted => (posted ?? 0) < triggerMs);
 
   event.waitUntil(
-    self.registration.showNotification('meenow', {
-      body: 'Time for your daily meenow!',
-      icon: '/icon-192.png',
-      badge: '/badge-96.png',
-      tag: 'meenow-daily',
-    }).catch(err => console.error('[sw] showNotification failed', err))
+    shouldNotify.then(should => {
+      if (!should) return;
+      return self.registration.showNotification('meenow', {
+        body: 'Time for your daily meenow!',
+        icon: '/icon-192.png',
+        badge: '/badge-96.png',
+        tag: 'meenow-daily',
+      });
+    }).catch(err => console.error('[sw] push handler failed', err))
   );
 });
 
@@ -50,6 +48,6 @@ self.addEventListener('notificationclick', event => {
         if ('focus' in client) { client.focus(); return; }
       }
       return self.clients.openWindow('/');
-    })
+    }).catch(err => console.error('[sw] notificationclick failed', err))
   );
 });

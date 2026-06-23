@@ -1,5 +1,5 @@
 // Post detail screen: full-screen view of a single post with photo swiper, caption, location, comments, and reply input.
-import { CHEVRON_LEFT_ICON } from '../icons';
+import { CHEVRON_LEFT_ICON, TRASH_ICON } from '../icons';
 import type { AuthState } from '../api/auth';
 import { fetchPostContext, postReply, type FeedPost, type MastodonReply } from '../api/pixelfed';
 import { formatRelativeTime } from '../timer';
@@ -8,6 +8,7 @@ export function renderPostDetail(
   post: FeedPost,
   auth: AuthState,
   onBack: () => void,
+  onDelete?: () => Promise<void>,
 ): HTMLElement {
   const root = document.createElement('div');
   root.id = 'screen-post-detail';
@@ -25,9 +26,18 @@ export function renderPostDetail(
   header.appendChild(backBtn);
 
   const title = document.createElement('h1');
-  title.className = 'text-base font-semibold text-ink';
+  title.className = 'flex-1 text-base font-semibold text-ink';
   title.textContent = 'Post';
   header.appendChild(title);
+
+  if (onDelete && post.account.id === auth.accountId) {
+    const trashBtn = document.createElement('button');
+    trashBtn.className = 'w-8 h-8 flex items-center justify-center text-ink/40 hover:text-red-500 transition-colors';
+    trashBtn.setAttribute('aria-label', 'Delete post');
+    trashBtn.innerHTML = TRASH_ICON;
+    trashBtn.addEventListener('click', () => showDeleteConfirm(root, onDelete));
+    header.appendChild(trashBtn);
+  }
 
   root.appendChild(header);
 
@@ -95,7 +105,7 @@ export function renderPostDetail(
 
   const replyInput = document.createElement('textarea');
   replyInput.id = 'reply-input';
-  replyInput.className = 'flex-1 resize-none rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm text-ink placeholder:text-ink/35 focus:outline-none focus:border-gold/60 min-h-[40px] max-h-32';
+  replyInput.className = 'flex-1 resize-none rounded-xl border border-ink/20 bg-cream px-3 py-2 text-sm text-ink placeholder:text-ink/35 focus:outline-none focus:border-gold/60 min-h-[40px] max-h-32';
   replyInput.placeholder = 'Add a reply…';
   replyInput.rows = 1;
   replyBar.appendChild(replyInput);
@@ -137,6 +147,51 @@ export function renderPostDetail(
   loadComments(commentsSection, auth, post.id);
 
   return root;
+}
+
+function showDeleteConfirm(root: HTMLElement, onDelete: () => Promise<void>): void {
+  const sheet = document.createElement('div');
+  sheet.className = 'fixed inset-0 z-50 flex items-end bg-black/40';
+
+  const panel = document.createElement('div');
+  panel.className = 'w-full bg-cream rounded-t-2xl px-6 pt-6 pb-10 shadow-xl';
+
+  const heading = document.createElement('p');
+  heading.className = 'text-base font-semibold text-ink mb-1';
+  heading.textContent = 'Delete this post?';
+  panel.appendChild(heading);
+
+  const sub = document.createElement('p');
+  sub.className = 'text-sm text-ink/50 mb-6';
+  sub.textContent = 'This cannot be undone.';
+  panel.appendChild(sub);
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'w-full py-3 rounded-xl bg-red-500 text-white font-semibold text-sm mb-3 transition-opacity';
+  deleteBtn.textContent = 'Delete';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'w-full py-3 rounded-xl bg-ink/8 text-ink font-semibold text-sm';
+  cancelBtn.textContent = 'Cancel';
+
+  deleteBtn.addEventListener('click', () => {
+    deleteBtn.disabled = true;
+    deleteBtn.textContent = 'Deleting…';
+    cancelBtn.disabled = true;
+    onDelete().catch(() => {
+      deleteBtn.disabled = false;
+      deleteBtn.textContent = 'Retry';
+      cancelBtn.disabled = false;
+    });
+  });
+
+  cancelBtn.addEventListener('click', () => { sheet.remove(); });
+  sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.remove(); });
+
+  panel.appendChild(deleteBtn);
+  panel.appendChild(cancelBtn);
+  sheet.appendChild(panel);
+  root.appendChild(sheet);
 }
 
 function makePhotoSwiper(post: FeedPost): HTMLElement {

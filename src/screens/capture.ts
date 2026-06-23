@@ -1,10 +1,10 @@
 // Capture screen: dual-camera photo capture flow (back camera then selfie), composite stitching, preview with optional caption/location, and post submission.
 import { MAX_POSTS_PER_TRIGGER } from '../state';
-
-const CAMERA_SWITCH_DELAY_MS = 600; // browser needs time to release back camera before front opens
 import { getAuthState } from '../api/auth';
 import { postMeenow } from '../api/pixelfed';
 import { CAT_EARS_SHUTTER } from '../icons';
+
+const CAMERA_SWITCH_DELAY_MS = 600; // browser needs time to release back camera before front opens
 
 type Step = 'start' | 'back' | 'switching' | 'front' | 'preview' | 'uploading' | 'error';
 
@@ -164,7 +164,7 @@ function cameraErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Could not access camera.';
 }
 
-export function renderCapture(postCount: number, onPosted: () => void, onDone?: () => void): HTMLElement {
+export function renderCapture(postCount: number, onPosted: () => void, onDone: () => void): HTMLElement {
   const root = document.createElement('div');
   root.id = 'screen-capture';
 
@@ -287,6 +287,8 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone?: 
     try {
       await openCamera(video, 'user');
       applyViewfinderTransform(video);
+      const t = video.style.transform;
+      video.style.transform = t ? `${t} scaleX(-1)` : 'scaleX(-1)';
     } catch (err) {
       show('error', cameraErrorMessage(err));
       return;
@@ -324,7 +326,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone?: 
 
     const textarea = document.createElement('textarea');
     textarea.placeholder = 'Add a message… (optional)';
-    textarea.className = 'w-full rounded-xl border border-ink/15 bg-white/60 px-3 py-2 text-sm text-ink placeholder:text-ink/30 resize-none focus:outline-none focus:ring-1 focus:ring-gold/50';
+    textarea.className = 'w-full rounded-xl border border-ink/15 bg-cream px-3 py-2 text-sm text-ink placeholder:text-ink/30 resize-none focus:outline-none focus:ring-1 focus:ring-gold/50';
     textarea.rows = 2;
     textarea.value = statusText;
     textarea.addEventListener('input', () => { statusText = textarea.value; });
@@ -410,7 +412,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone?: 
       statusText = '';
       locationText = '';
       onPosted();
-      onDone?.();
+      onDone();
     } catch (err) {
       show('error', err instanceof Error ? err.message : 'Upload failed.');
     }

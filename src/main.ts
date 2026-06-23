@@ -3,9 +3,9 @@ declare const __GIT_HASH__: string;
 
 import './style.css';
 import { getAuthState, handleOAuthCallback } from './api/auth';
-import { getLastTriggerTime, computeState, type AppState } from './timer';
+import { getLastTriggerTime, type AppState } from './timer';
 import { MAX_POSTS_PER_TRIGGER } from './state';
-import { fetchTodayPostCount } from './api/pixelfed';
+import { fetchTodayPostCount, deletePost, removePostFromCache } from './api/pixelfed';
 import { renderCapture } from './screens/capture';
 import { renderFeed } from './screens/feed';
 import { renderGrid } from './screens/grid';
@@ -15,10 +15,13 @@ import type { FeedPost } from './api/pixelfed';
 import { renderInstallNudge, removeInstallNudge } from './components/installNudge';
 import { renderNotificationNudge, removeNotificationNudge } from './components/notificationNudge';
 import { registerSW } from 'virtual:pwa-register';
+import { idbSet } from './idb';
+import { isPwaInstalled, isPwaSubbed } from './state';
+import { resubscribeAsPwa } from './notifications';
 
 const app = document.getElementById('app')!;
 type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'grid';
-const BASE_SCREENS = new Set<Screen>(['feed', 'awaiting_capture', 'login']);
+const BASE_SCREENS = new Set<Screen>(['feed', 'login']);
 let activeScreen: Screen | null = null;
 let tickId: number | null = null;
 
@@ -68,6 +71,9 @@ const updateSW = registerSW({
 });
 
 function onPosted(): void {
+  if (periodPostCount === 0) {
+    void idbSet('posted-trigger-ms', getLastTriggerTime().getTime());
+  }
   periodPostCount = Math.min(periodPostCount + 1, MAX_POSTS_PER_TRIGGER);
 }
 
@@ -101,11 +107,17 @@ function mountPostDetail(post: FeedPost, onClose?: () => void): void {
   const onPopState = () => { activeScreen = null; returnTo(); };
   window.addEventListener('popstate', onPopState, { once: true });
 
+  const onDeletePost = async (): Promise<void> => {
+    await deletePost(auth, post.id);
+    removePostFromCache(post.id);
+    history.back();
+  };
+
   let el: HTMLElement;
   try {
     el = renderPostDetail(post, auth, () => {
       history.back();
-    });
+    }, onDeletePost);
   } catch {
     window.removeEventListener('popstate', onPopState);
     history.back();
@@ -157,10 +169,6 @@ function mount(screen: AppState | 'login'): void {
     removeNotificationNudge();
     app.appendChild(renderLogin());
     renderInstallNudge();
-  } else if (screen === 'awaiting_capture') {
-    removeInstallNudge();
-    app.appendChild(renderCapture(periodPostCount, onPosted, () => { activeScreen = null; }));
-    void renderNotificationNudge();
   } else {
     app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid));
     void renderNotificationNudge();
@@ -180,7 +188,7 @@ function tick(): void {
   }
 
   const auth = getAuthState();
-  const screen: AppState | 'login' = auth ? computeState(periodPostCount) : 'login';
+  const screen: AppState | 'login' = auth ? 'feed' : 'login';
 
   if ((screen as Screen) !== activeScreen) {
     activeScreen = screen;
@@ -200,6 +208,12 @@ async function init(): Promise<void> {
     }
   }
 
+  // On first launch as an installed PWA, silently re-subscribe so notifications
+  // are routed to the app instead of Chrome.
+  if (isPwaInstalled() && Notification.permission === 'granted' && !isPwaSubbed()) {
+    void resubscribeAsPwa();
+  }
+
   // Fetch the authoritative post count for the current trigger period from the
   // server before starting the tick loop. This ensures multi-device state is
   // correct from the first render without any localStorage synchronisation logic.
@@ -212,6 +226,9 @@ async function init(): Promise<void> {
     `;
     try {
       periodPostCount = Math.min(await fetchTodayPostCount(auth), MAX_POSTS_PER_TRIGGER);
+      if (periodPostCount > 0) {
+        void idbSet('posted-trigger-ms', getLastTriggerTime().getTime());
+      }
     } catch {
       periodPostCount = 0;
     }

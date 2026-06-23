@@ -2,6 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --color-cream: 253 251 247;
+  --color-ink: 45 45 45;
+  --color-ink-muted: 90 90 90;
+  --color-gold: 201 169 110;
+  --color-gold-light: 232 213 176;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-cream: 28 26 23;
+    --color-ink: 237 234 227;
+    --color-ink-muted: 154 148 144;
+    --color-gold: 212 181 122;
+    --color-gold-light: 58 48 32;
+  }
+}
+
 @layer base {
   body {
     @apply bg-cream text-ink font-sans;
