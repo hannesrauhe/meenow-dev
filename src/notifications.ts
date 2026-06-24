@@ -133,10 +133,11 @@ function shouldResubscribe(): boolean {
   if (!VAPID_PUBLIC_KEY || Notification.permission !== 'granted') return false;
   const stored = getStoredVapidKey();
   if (!stored) {
-    // First load after this feature was added: record the current key and
-    // check only for the PWA routing mismatch (no rotation to detect yet).
-    setStoredVapidKey(VAPID_PUBLIC_KEY);
-    return isPwaInstalled() && !isPwaSubbed();
+    // No stored key means we can't verify whether the existing subscription
+    // matches the current key — re-subscribe unconditionally so any previously
+    // rotated key is corrected. setStoredVapidKey is called by resubscribeAsPwa
+    // on success, so it gets recorded after the re-subscribe completes.
+    return true;
   }
   if (stored !== VAPID_PUBLIC_KEY) return true;        // key rotated
   if (isPwaInstalled() && !isPwaSubbed()) return true; // PWA routing mismatch
