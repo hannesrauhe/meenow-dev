@@ -1,5 +1,5 @@
 // Push notifications: VAPID subscription registration, permission request, and relay-repo subscription management.
-import { getPushSubFilename, setPushSubFilename, clearPushSubFilename, isPwaInstalled, setPwaSubbed } from './state';
+import { getPushSubFilename, setPushSubFilename, clearPushSubFilename, isPwaInstalled, isPwaSubbed, setPwaSubbed, getStoredVapidKey, setStoredVapidKey } from './state';
 
 // These are injected at build time from GitHub repo secrets (VITE_* prefix).
 // Each deployed instance (dev.meenow.de, meenow.de) has its own secret values,
@@ -79,6 +79,7 @@ export async function enableNotifications(): Promise<'granted' | 'denied' | 'err
 
   setPushSubFilename(filename);
   if (isPwaInstalled()) setPwaSubbed();
+  if (VAPID_PUBLIC_KEY) setStoredVapidKey(VAPID_PUBLIC_KEY);
   return 'granted';
 }
 
@@ -116,9 +117,32 @@ export async function resubscribeAsPwa(): Promise<void> {
 
     if (res.ok) {
       setPushSubFilename(filename);
-      setPwaSubbed();
+      if (isPwaInstalled()) setPwaSubbed();
+      if (VAPID_PUBLIC_KEY) setStoredVapidKey(VAPID_PUBLIC_KEY);
     }
   } catch {
     // Silent failure — will retry on the next launch.
   }
+}
+
+// Returns true if the push subscription needs to be recreated — either because
+// the VAPID key was rotated or because the subscription was created in a browser
+// tab and needs to be re-created in the installed PWA context.
+// Also bootstraps meenow:vapid-key on first call so future rotations are detectable.
+function shouldResubscribe(): boolean {
+  if (!VAPID_PUBLIC_KEY || Notification.permission !== 'granted') return false;
+  const stored = getStoredVapidKey();
+  if (!stored) {
+    // First load after this feature was added: record the current key and
+    // check only for the PWA routing mismatch (no rotation to detect yet).
+    setStoredVapidKey(VAPID_PUBLIC_KEY);
+    return isPwaInstalled() && !isPwaSubbed();
+  }
+  if (stored !== VAPID_PUBLIC_KEY) return true;        // key rotated
+  if (isPwaInstalled() && !isPwaSubbed()) return true; // PWA routing mismatch
+  return false;
+}
+
+export async function resubscribeIfNeeded(): Promise<void> {
+  if (shouldResubscribe()) await resubscribeAsPwa();
 }
