@@ -56,7 +56,10 @@ export async function enableNotifications(): Promise<'granted' | 'denied' | 'err
   // Reuse the filename written on the previous registration to avoid accumulating
   // duplicate files in the subscriptions repo for the same browser.
   const existingFile = getPushSubFilename();
-  if (existingFile) return 'granted';
+  if (existingFile) {
+    setStoredVapidKey(VAPID_PUBLIC_KEY);
+    return 'granted';
+  }
 
   const filename = `${PUSH_SUBS_PATH}/${crypto.randomUUID()}.json`;
   const content = btoa(JSON.stringify(sub.toJSON()));
