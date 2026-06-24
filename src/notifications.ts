@@ -1,5 +1,5 @@
 // Push notifications: VAPID subscription registration, permission request, and relay-repo subscription management.
-import { getPushSubFilename, setPushSubFilename, clearPushSubFilename, isPwaInstalled, setPwaSubbed } from './state';
+import { getPushSubFilename, setPushSubFilename, clearPushSubFilename, isPwaInstalled, isPwaSubbed, setPwaSubbed, getStoredVapidKey, setStoredVapidKey } from './state';
 
 // These are injected at build time from GitHub repo secrets (VITE_* prefix).
 // Each deployed instance (dev.meenow.de, meenow.de) has its own secret values,
@@ -56,7 +56,10 @@ export async function enableNotifications(): Promise<'granted' | 'denied' | 'err
   // Reuse the filename written on the previous registration to avoid accumulating
   // duplicate files in the subscriptions repo for the same browser.
   const existingFile = getPushSubFilename();
-  if (existingFile) return 'granted';
+  if (existingFile) {
+    setStoredVapidKey(VAPID_PUBLIC_KEY);
+    return 'granted';
+  }
 
   const filename = `${PUSH_SUBS_PATH}/${crypto.randomUUID()}.json`;
   const content = btoa(JSON.stringify(sub.toJSON()));
@@ -79,6 +82,7 @@ export async function enableNotifications(): Promise<'granted' | 'denied' | 'err
 
   setPushSubFilename(filename);
   if (isPwaInstalled()) setPwaSubbed();
+  if (VAPID_PUBLIC_KEY) setStoredVapidKey(VAPID_PUBLIC_KEY);
   return 'granted';
 }
 
@@ -116,9 +120,33 @@ export async function resubscribeAsPwa(): Promise<void> {
 
     if (res.ok) {
       setPushSubFilename(filename);
-      setPwaSubbed();
+      if (isPwaInstalled()) setPwaSubbed();
+      if (VAPID_PUBLIC_KEY) setStoredVapidKey(VAPID_PUBLIC_KEY);
     }
   } catch {
     // Silent failure — will retry on the next launch.
   }
+}
+
+// Returns true if the push subscription needs to be recreated — either because
+// the VAPID key was rotated or because the subscription was created in a browser
+// tab and needs to be re-created in the installed PWA context.
+// Also bootstraps meenow:vapid-key on first call so future rotations are detectable.
+function shouldResubscribe(): boolean {
+  if (!VAPID_PUBLIC_KEY || Notification.permission !== 'granted') return false;
+  const stored = getStoredVapidKey();
+  if (!stored) {
+    // No stored key means we can't verify whether the existing subscription
+    // matches the current key — re-subscribe unconditionally so any previously
+    // rotated key is corrected. setStoredVapidKey is called by resubscribeAsPwa
+    // on success, so it gets recorded after the re-subscribe completes.
+    return true;
+  }
+  if (stored !== VAPID_PUBLIC_KEY) return true;        // key rotated
+  if (isPwaInstalled() && !isPwaSubbed()) return true; // PWA routing mismatch
+  return false;
+}
+
+export async function resubscribeIfNeeded(): Promise<void> {
+  if (shouldResubscribe()) await resubscribeAsPwa();
 }
