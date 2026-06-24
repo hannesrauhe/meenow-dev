@@ -57,12 +57,15 @@ async function captureFrame(video: HTMLVideoElement): Promise<Blob> {
     ? video.srcObject.getVideoTracks()[0]
     : undefined;
 
-  // Use ImageCapture API where available — returns EXIF-correct JPEG without canvas
+  // Use ImageCapture API where available — returns EXIF-correct JPEG without canvas.
+  // Guard: on iPadOS Safari takePhoto() can silently return a near-empty black image
+  // instead of throwing, so reject blobs below 2 KB and fall through to canvas.
   if (track && 'ImageCapture' in window) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const ic = new (window as any).ImageCapture(track) as { takePhoto(): Promise<Blob> };
-      return await ic.takePhoto();
+      const blob = await ic.takePhoto();
+      if (blob.size > 2048) return blob;
     } catch {
       // fall through to canvas
     }
