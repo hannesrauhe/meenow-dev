@@ -16,8 +16,7 @@ import { renderInstallNudge, removeInstallNudge } from './components/installNudg
 import { renderNotificationNudge, removeNotificationNudge } from './components/notificationNudge';
 import { registerSW } from 'virtual:pwa-register';
 import { idbSet } from './idb';
-import { isPwaInstalled, isPwaSubbed } from './state';
-import { resubscribeAsPwa } from './notifications';
+import { resubscribeIfNeeded } from './notifications';
 
 const app = document.getElementById('app')!;
 type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'grid';
@@ -208,11 +207,9 @@ async function init(): Promise<void> {
     }
   }
 
-  // On first launch as an installed PWA, silently re-subscribe so notifications
-  // are routed to the app instead of Chrome.
-  if (isPwaInstalled() && Notification.permission === 'granted' && !isPwaSubbed()) {
-    void resubscribeAsPwa();
-  }
+  // Re-subscribe if the VAPID key was rotated or if the subscription was created
+  // in a browser tab and needs to be re-created in the installed PWA context.
+  void resubscribeIfNeeded();
 
   // Fetch the authoritative post count for the current trigger period from the
   // server before starting the tick loop. This ensures multi-device state is

@@ -36,6 +36,17 @@ export function setPwaSubbed(): void {
   localStorage.setItem('meenow:pwa-subbed', 'true');
 }
 
+// Stores the VAPID public key used when the active push subscription was created.
+// On app load, a mismatch against the build-time key indicates key rotation and
+// triggers an automatic re-subscribe with the new key.
+export function getStoredVapidKey(): string | null {
+  return localStorage.getItem('meenow:vapid-key');
+}
+
+export function setStoredVapidKey(key: string): void {
+  localStorage.setItem('meenow:vapid-key', key);
+}
+
 export function isInstallDismissed(): boolean {
   const raw = localStorage.getItem('meenow:install-dismiss');
   if (!raw) return false;
