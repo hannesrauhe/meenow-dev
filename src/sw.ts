@@ -28,15 +28,18 @@ self.addEventListener('push', event => {
     : idbGet('posted-trigger-ms').then(posted => (posted ?? 0) < triggerMs);
 
   event.waitUntil(
-    shouldNotify.then(should => {
-      if (!should) return;
-      return self.registration.showNotification('meenow', {
-        body: 'Time for your daily meenow!',
-        icon: '/icon-192.png',
-        badge: '/badge-96.png',
-        tag: 'meenow-daily',
-      });
-    }).catch(err => console.error('[sw] push handler failed', err))
+    shouldNotify
+      .catch(() => true)
+      .then(should => {
+        if (!should) return;
+        return self.registration.showNotification('meenow', {
+          body: 'Time for your daily meenow!',
+          icon: '/icon-192.png',
+          badge: '/badge-96.png',
+          tag: 'meenow-daily',
+        });
+      })
+      .catch(err => console.error('[sw] push handler failed', err))
   );
 });
 
