@@ -82,7 +82,7 @@ export async function enableNotifications(): Promise<'granted' | 'denied' | 'err
 
   setPushSubFilename(filename);
   if (isPwaInstalled()) setPwaSubbed();
-  if (VAPID_PUBLIC_KEY) setStoredVapidKey(VAPID_PUBLIC_KEY);
+  setStoredVapidKey(VAPID_PUBLIC_KEY);
   return 'granted';
 }
 
@@ -121,7 +121,7 @@ export async function resubscribeAsPwa(): Promise<void> {
     if (res.ok) {
       setPushSubFilename(filename);
       if (isPwaInstalled()) setPwaSubbed();
-      if (VAPID_PUBLIC_KEY) setStoredVapidKey(VAPID_PUBLIC_KEY);
+      setStoredVapidKey(VAPID_PUBLIC_KEY);
     }
   } catch {
     // Silent failure — will retry on the next launch.

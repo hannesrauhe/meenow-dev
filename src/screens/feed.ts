@@ -26,14 +26,17 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
   if (atQuota) {
     const statusEl = header.querySelector('#header-status')!;
     const nextTrigger = getNextTriggerTime();
-    let intervalId: number;
     const updateCountdown = (): void => {
-      if (!statusEl.isConnected) { clearInterval(intervalId); return; }
+      // statusEl is only connected once the header is mounted; until then the
+      // interval keeps the element's text current and self-cleans afterwards.
       const ms = nextTrigger.getTime() - Date.now();
       statusEl.textContent = ms > 0 ? `next post in ${formatCountdown(ms)}` : '';
     };
     updateCountdown();
-    intervalId = setInterval(updateCountdown, 1000);
+    const intervalId = setInterval(() => {
+      if (!statusEl.isConnected) { clearInterval(intervalId); return; }
+      updateCountdown();
+    }, 1000);
   }
 
   el.appendChild(header);

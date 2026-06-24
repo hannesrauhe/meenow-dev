@@ -20,10 +20,12 @@ export function removeInstallNudge(): void {
   document.getElementById('install-nudge')?.remove();
 }
 
-export function renderInstallNudge(): void {
-  if (isPwaInstalled() || isInstallDismissed()) return;
+// Returns true if a banner is (or already was) on screen, so callers can avoid
+// rendering a second bottom banner on top of it.
+export function renderInstallNudge(): boolean {
+  if (isPwaInstalled() || isInstallDismissed()) return false;
   const existing = document.getElementById('install-nudge');
-  if (existing) return;
+  if (existing) return true;
 
   const ios = isIOS();
   const canPrompt = !ios && deferredPrompt !== null;
@@ -69,4 +71,5 @@ export function renderInstallNudge(): void {
     dismissInstall();
     banner.remove();
   });
+  return true;
 }

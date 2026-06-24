@@ -170,8 +170,12 @@ function mount(screen: AppState | 'login'): void {
     renderInstallNudge();
   } else {
     app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid));
-    void renderNotificationNudge();
-    renderInstallNudge();
+    // Show at most one bottom banner: the install nudge takes priority while the
+    // app is not installed; the notification nudge only appears once the install
+    // nudge is gone (installed or dismissed). Both are fixed bottom-0 and would
+    // otherwise overlap.
+    const installShown = renderInstallNudge();
+    if (!installShown) void renderNotificationNudge();
   }
 }
 
