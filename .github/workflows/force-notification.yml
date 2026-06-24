@@ -29,6 +29,6 @@ jobs:
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
           VAPID_SUBJECT: mailto:2qhhabkrd@mozmail.com
-          SUBS_DIR: push-subs/subscriptions/dev
+          SUBS_DIR: push-subs/${{ secrets.VITE_PUSH_SUBS_PATH }}
           FORCE: 'true'
         run: node scripts/send-tick.mjs
