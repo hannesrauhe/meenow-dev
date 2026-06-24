@@ -27,8 +27,6 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
     const statusEl = header.querySelector('#header-status')!;
     const nextTrigger = getNextTriggerTime();
     const updateCountdown = (): void => {
-      // statusEl is only connected once the header is mounted; until then the
-      // interval keeps the element's text current and self-cleans afterwards.
       const ms = nextTrigger.getTime() - Date.now();
       statusEl.textContent = ms > 0 ? `next post in ${formatCountdown(ms)}` : '';
     };

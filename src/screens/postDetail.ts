@@ -484,9 +484,7 @@ function makeReplyRow(reply: MastodonReply): HTMLElement {
 
   const content = document.createElement('div');
   content.className = 'text-sm text-ink';
-  // reply.content is server-rendered, server-sanitized HTML from the
-  // Mastodon/Pixelfed API (status content is sanitized upstream), so it is
-  // assigned directly. This trust assumption is the single HTML sink in the app.
+  // Trusted: server-sanitized HTML from the Mastodon/Pixelfed API.
   content.innerHTML = reply.content;
   body.appendChild(content);
 

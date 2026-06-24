@@ -20,8 +20,7 @@ export function removeInstallNudge(): void {
   document.getElementById('install-nudge')?.remove();
 }
 
-// Returns true if a banner is (or already was) on screen, so callers can avoid
-// rendering a second bottom banner on top of it.
+// Returns true if a banner is on screen, so callers can skip a second one.
 export function renderInstallNudge(): boolean {
   if (isPwaInstalled() || isInstallDismissed()) return false;
   const existing = document.getElementById('install-nudge');

@@ -137,9 +137,7 @@ export async function postMeenow(
   return statusData.url;
 }
 
-// Compares two Mastodon/Pixelfed snowflake IDs numerically. A plain string
-// comparison is wrong for numeric IDs of differing length ("9" > "100"), so
-// BigInt is used; non-numeric IDs fall back to lexicographic comparison.
+// Numeric ID compare — string compare is wrong for differing lengths ("9" > "100").
 function isNewerId(a: string, b: string): boolean {
   if (!b) return true;
   try {
@@ -158,10 +156,7 @@ function isNewerId(a: string, b: string): boolean {
 // _homePending deduplicates concurrent callers during the initial page-load sequence.
 const HOME_TIMELINE_LIMIT = 40;
 const HOME_CACHE_TTL_MS = 10_000;
-// Upper bound on the cached timeline length. Incremental since_id fetches keep
-// prepending fresh posts, so the array is trimmed after each merge to prevent
-// unbounded growth over a long-lived session. The feed only ever displays the
-// current trigger period, so older entries beyond this cap are not needed.
+// Cap the cache so incremental since_id prepends can't grow it unbounded.
 const HOME_CACHE_MAX = HOME_TIMELINE_LIMIT * 3;
 interface HomeCache { statuses: MastodonStatus[]; newestId: string; fetchedAt: number }
 let _homeCache: HomeCache | null = null;

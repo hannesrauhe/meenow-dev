@@ -21,9 +21,7 @@ for (const file of readdirSync(subsDir).filter(f => f.endsWith('.json'))) {
     await webpush.sendNotification(sub, payload, { TTL: 45 * 60, urgency: 'high' });
     console.log(`Sent to ${file}`);
   } catch (err) {
-    // Only 404/410 reliably indicate an expired or unregistered subscription.
-    // 400 can be a transient/malformed-request error, so it is logged rather
-    // than treated as expiry to avoid deleting valid subscriptions.
+    // 404/410 = expired/unregistered. 400 is not reliable expiry, so keep it.
     if (err instanceof Error && 'statusCode' in err &&
         (err.statusCode === 410 || err.statusCode === 404)) {
       rmSync(`${subsDir}/${file}`);
