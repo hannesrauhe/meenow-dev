@@ -170,8 +170,9 @@ function mount(screen: AppState | 'login'): void {
     renderInstallNudge();
   } else {
     app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid));
-    void renderNotificationNudge();
-    renderInstallNudge();
+    // Show only one bottom banner — both are fixed bottom-0 and would overlap.
+    const installShown = renderInstallNudge();
+    if (!installShown) void renderNotificationNudge();
   }
 }
 
@@ -218,7 +219,7 @@ async function init(): Promise<void> {
   if (auth) {
     app.innerHTML = `
       <div class="flex items-center justify-center min-h-dvh">
-        <div class="w-8 h-8 border-[3px] border-gold/30 border-t-gold rounded-full animate-spin"></div>
+        <div class="w-8 h-8 spinner"></div>
       </div>
     `;
     try {

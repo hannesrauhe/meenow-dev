@@ -132,9 +132,19 @@ export async function postMeenow(
   // newestId advances so the next incremental fetch uses it as since_id.
   if (_homeCache) {
     _homeCache.statuses = [statusData, ..._homeCache.statuses];
-    if (statusData.id > _homeCache.newestId) _homeCache.newestId = statusData.id;
+    if (isNewerId(statusData.id, _homeCache.newestId)) _homeCache.newestId = statusData.id;
   }
   return statusData.url;
+}
+
+// Numeric ID compare — string compare is wrong for differing lengths ("9" > "100").
+function isNewerId(a: string, b: string): boolean {
+  if (!b) return true;
+  try {
+    return BigInt(a) > BigInt(b);
+  } catch {
+    return a > b;
+  }
 }
 
 // --- Feed ---
@@ -146,6 +156,8 @@ export async function postMeenow(
 // _homePending deduplicates concurrent callers during the initial page-load sequence.
 const HOME_TIMELINE_LIMIT = 40;
 const HOME_CACHE_TTL_MS = 10_000;
+// Cap the cache so incremental since_id prepends can't grow it unbounded.
+const HOME_CACHE_MAX = HOME_TIMELINE_LIMIT * 3;
 interface HomeCache { statuses: MastodonStatus[]; newestId: string; fetchedAt: number }
 let _homeCache: HomeCache | null = null;
 let _homePending: Promise<MastodonStatus[]> | null = null;
@@ -168,7 +180,7 @@ function fetchHomeTimeline(auth: AuthState): Promise<MastodonStatus[]> {
         const seen = new Set(_homeCache.statuses.map(s => s.id));
         const fresh = incoming.filter(s => !seen.has(s.id));
         if (fresh.length > 0) {
-          _homeCache.statuses = [...fresh, ..._homeCache.statuses];
+          _homeCache.statuses = [...fresh, ..._homeCache.statuses].slice(0, HOME_CACHE_MAX);
           _homeCache.newestId = fresh[0].id;
         }
         _homeCache.fetchedAt = now;

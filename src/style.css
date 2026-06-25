@@ -40,6 +40,11 @@
     @apply bg-ink text-cream rounded-full px-8 py-3 text-base font-medium
            active:scale-95 transition-transform select-none cursor-pointer;
   }
+
+  /* Loading spinner. Diameter is set by w-/h- utilities on the element. */
+  .spinner {
+    @apply border-[3px] border-gold/30 border-t-gold rounded-full animate-spin;
+  }
 }
 
 @layer utilities {
