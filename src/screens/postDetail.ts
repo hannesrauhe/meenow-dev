@@ -437,7 +437,7 @@ function openLightbox(urls: string[], startIndex: number): void {
 async function loadComments(section: HTMLElement, auth: AuthState, statusId: string): Promise<void> {
   section.innerHTML = `
     <div class="flex items-center justify-center py-8">
-      <div class="w-6 h-6 border-[3px] border-gold/30 border-t-gold rounded-full animate-spin"></div>
+      <div class="w-6 h-6 spinner"></div>
     </div>
   `;
 

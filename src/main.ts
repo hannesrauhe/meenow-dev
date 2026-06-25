@@ -219,7 +219,7 @@ async function init(): Promise<void> {
   if (auth) {
     app.innerHTML = `
       <div class="flex items-center justify-center min-h-dvh">
-        <div class="w-8 h-8 border-[3px] border-gold/30 border-t-gold rounded-full animate-spin"></div>
+        <div class="w-8 h-8 spinner"></div>
       </div>
     `;
     try {

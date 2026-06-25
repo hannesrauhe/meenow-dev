@@ -434,7 +434,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     const d = document.createElement('div');
     d.className = 'flex flex-col items-center gap-4';
     d.innerHTML = `
-      <div class="w-12 h-12 border-4 border-gold/30 border-t-gold rounded-full animate-spin"></div>
+      <div class="w-12 h-12 spinner"></div>
       <p class="text-sm text-ink/60">Posting your meenow…</p>
     `;
     return d;
