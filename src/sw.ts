@@ -1,4 +1,5 @@
 // Service worker: Workbox precache/route and push-notification handler.
+import { clientsClaim } from 'workbox-core';
 import { precacheAndRoute } from 'workbox-precaching';
 import { getLastTriggerTime } from './timer';
 import { idbGet } from './idb';
@@ -8,6 +9,13 @@ declare const self: ServiceWorkerGlobalScope & {
 };
 
 precacheAndRoute(self.__WB_MANIFEST);
+
+// Take control of open clients as soon as this worker activates. Without this,
+// skipWaiting() activates the new worker but does not control the already-open
+// page, so navigator.serviceWorker.controller never changes — the
+// `controlling` event vite-plugin-pwa reloads on never fires, and the update
+// banner's Refresh button appears dead.
+clientsClaim();
 
 self.addEventListener('message', (event: ExtendableMessageEvent) => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
