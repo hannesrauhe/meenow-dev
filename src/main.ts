@@ -41,17 +41,20 @@ if (DEV_HOSTNAMES.has(window.location.hostname)) {
   document.body.appendChild(badge);
 }
 
-function showUpdateBanner(updateSW: () => Promise<void>): void {
+function showUpdateBanner(updateSW: (reloadPage?: boolean) => Promise<void>): void {
   if (document.getElementById('update-nudge')) return;
   const banner = document.createElement('div');
   banner.id = 'update-nudge';
   banner.className = [
     'fixed top-0 left-0 right-0 z-50',
     'bg-ink text-cream',
-    'px-5 pt-4 pb-4',
+    'px-5 pb-4',
     'flex items-start gap-4',
     'border-b border-white/10',
   ].join(' ');
+  // Clear the standalone status-bar / display-cutout inset (index.html sets
+  // viewport-fit=cover) so the Refresh button is never under the status bar.
+  banner.style.paddingTop = 'calc(env(safe-area-inset-top, 0px) + 1rem)';
   banner.innerHTML = `
     <div class="flex-1 min-w-0">
       <p class="text-sm font-medium leading-snug">New version available</p>
@@ -61,8 +64,46 @@ function showUpdateBanner(updateSW: () => Promise<void>): void {
     <button id="btn-dismiss-update" class="shrink-0 text-cream/40 text-xl leading-none" aria-label="Dismiss">&times;</button>
   `;
   document.body.appendChild(banner);
-  banner.querySelector('#btn-update')?.addEventListener('click', () => void updateSW());
+
+  const btn = banner.querySelector<HTMLButtonElement>('#btn-update')!;
+  btn.addEventListener('click', () => void applyUpdate(btn, updateSW));
   banner.querySelector('#btn-dismiss-update')?.addEventListener('click', () => banner.remove());
+}
+
+// Drive the reload ourselves rather than relying on vite-plugin-pwa's
+// isUpdate-gated reload, which does not fire reliably in an installed PWA.
+// Forward progress is guaranteed by controllerchange OR a timeout fallback;
+// the reloaded guard prevents a double reload.
+async function applyUpdate(
+  btn: HTMLButtonElement,
+  updateSW: (reloadPage?: boolean) => Promise<void>,
+): Promise<void> {
+  btn.disabled = true;
+  btn.textContent = 'Updating…';
+
+  let reloaded = false;
+  const reloadOnce = (): void => {
+    if (reloaded) return;
+    reloaded = true;
+    window.location.reload();
+  };
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('controllerchange', reloadOnce, { once: true });
+  }
+  // Fallback for when the worker already activated (no controllerchange fires).
+  window.setTimeout(reloadOnce, 2500);
+
+  try {
+    await updateSW(true);
+  } catch { /* fallbacks + timeout still guarantee progress */ }
+
+  if ('serviceWorker' in navigator) {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      reg?.waiting?.postMessage({ type: 'SKIP_WAITING' });
+    } catch { /* ignore */ }
+  }
 }
 
 const updateSW = registerSW({
