@@ -1,4 +1,5 @@
 // Service worker: Workbox precache/route and push-notification handler.
+import { clientsClaim } from 'workbox-core';
 import { precacheAndRoute } from 'workbox-precaching';
 import { getLastTriggerTime } from './timer';
 import { idbGet } from './idb';
@@ -8,6 +9,10 @@ declare const self: ServiceWorkerGlobalScope & {
 };
 
 precacheAndRoute(self.__WB_MANIFEST);
+
+// Take control of open clients on activate so skipWaiting() reloads the page
+// (controllerchange fires) — otherwise the update banner's Refresh does nothing.
+clientsClaim();
 
 self.addEventListener('message', (event: ExtendableMessageEvent) => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();

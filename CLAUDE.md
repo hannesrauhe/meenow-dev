@@ -15,6 +15,10 @@ npx tsc --noEmit # type-check without building
 
 Push notification env vars (`VITE_VAPID_PUBLIC_KEY`, `VITE_PUSH_RELAY_TOKEN`, `VITE_PUSH_SUBS_PATH`) are only enforced during CI builds (`CI=true`). Local builds succeed without them; push features degrade gracefully.
 
+## Code style
+
+- Keep inline comments minimal. Only comment non-obvious intent or rationale (e.g. why a workaround exists); do not narrate what the code already states. Prefer a single concise line over multi-line explanations.
+
 ## Tech stack
 
 - Vanilla TypeScript, no framework
