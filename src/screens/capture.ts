@@ -238,12 +238,12 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     d.appendChild(video);
 
     const hint = document.createElement('p');
-    hint.className = 'absolute top-8 left-1/2 -translate-x-1/2 text-white/70 text-sm bg-black/30 rounded-full px-4 py-1.5';
+    hint.className = 'absolute top-[max(2rem,calc(env(safe-area-inset-top,0px)+0.5rem))] left-1/2 -translate-x-1/2 text-white/70 text-sm bg-black/30 rounded-full px-4 py-1.5';
     hint.textContent = 'Point at your surroundings';
     d.appendChild(hint);
 
     const btn = document.createElement('button');
-    btn.className = 'absolute bottom-12 left-1/2 -translate-x-1/2 w-20 h-20 text-white drop-shadow-lg active:scale-95';
+    btn.className = 'absolute bottom-[max(3rem,calc(env(safe-area-inset-bottom,0px)+1rem))] left-1/2 -translate-x-1/2 w-20 h-20 text-white drop-shadow-lg active:scale-95';
     btn.setAttribute('aria-label', 'Capture');
     btn.innerHTML = CAT_EARS_SHUTTER;
     btn.addEventListener('click', () => captureBack(video));
