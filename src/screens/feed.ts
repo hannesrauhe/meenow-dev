@@ -26,14 +26,15 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
   if (atQuota) {
     const statusEl = header.querySelector('#header-status')!;
     const nextTrigger = getNextTriggerTime();
-    let intervalId: number;
     const updateCountdown = (): void => {
-      if (!statusEl.isConnected) { clearInterval(intervalId); return; }
       const ms = nextTrigger.getTime() - Date.now();
       statusEl.textContent = ms > 0 ? `next post in ${formatCountdown(ms)}` : '';
     };
     updateCountdown();
-    intervalId = setInterval(updateCountdown, 1000);
+    const intervalId = setInterval(() => {
+      if (!statusEl.isConnected) { clearInterval(intervalId); return; }
+      updateCountdown();
+    }, 1000);
   }
 
   el.appendChild(header);
@@ -79,7 +80,7 @@ async function loadFeed(container: HTMLElement, auth: AuthState, postCount: numb
 
   container.innerHTML = `
     <div class="flex items-center justify-center py-20">
-      <div class="w-8 h-8 border-[3px] border-gold/30 border-t-gold rounded-full animate-spin"></div>
+      <div class="w-8 h-8 spinner"></div>
     </div>
   `;
 

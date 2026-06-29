@@ -15,7 +15,7 @@ import type { FeedPost } from './api/pixelfed';
 import { renderInstallNudge, removeInstallNudge } from './components/installNudge';
 import { renderNotificationNudge, removeNotificationNudge } from './components/notificationNudge';
 import { registerSW } from 'virtual:pwa-register';
-import { idbSet } from './idb';
+import { idbSet, IDB_KEYS } from './idb';
 import { resubscribeIfNeeded } from './notifications';
 
 const app = document.getElementById('app')!;
@@ -41,28 +41,94 @@ if (DEV_HOSTNAMES.has(window.location.hostname)) {
   document.body.appendChild(badge);
 }
 
-function showUpdateBanner(updateSW: () => Promise<void>): void {
+function showUpdateBanner(updateSW: (reloadPage?: boolean) => Promise<void>): void {
   if (document.getElementById('update-nudge')) return;
   const banner = document.createElement('div');
   banner.id = 'update-nudge';
   banner.className = [
     'fixed top-0 left-0 right-0 z-50',
     'bg-ink text-cream',
-    'px-5 pt-4 pb-4',
+    'px-5 pb-4',
     'flex items-start gap-4',
     'border-b border-white/10',
   ].join(' ');
+  // Clear the standalone status-bar / display-cutout inset (index.html sets
+  // viewport-fit=cover) so the Refresh button is never under the status bar.
+  banner.style.paddingTop = 'calc(env(safe-area-inset-top, 0px) + 1rem)';
   banner.innerHTML = `
     <div class="flex-1 min-w-0">
       <p class="text-sm font-medium leading-snug">New version available</p>
-      <p class="text-xs text-cream/55 mt-0.5 leading-snug">Refresh to get the latest update.</p>
+      <p id="update-status" class="text-xs text-cream/55 mt-0.5 leading-snug">Refresh to get the latest update.</p>
     </div>
     <button id="btn-update" class="shrink-0 bg-gold text-ink rounded-full px-4 py-1.5 text-sm font-medium">Refresh</button>
     <button id="btn-dismiss-update" class="shrink-0 text-cream/40 text-xl leading-none" aria-label="Dismiss">&times;</button>
   `;
   document.body.appendChild(banner);
-  banner.querySelector('#btn-update')?.addEventListener('click', () => void updateSW());
+
+  const btn = banner.querySelector<HTMLButtonElement>('#btn-update')!;
+  const status = banner.querySelector<HTMLParagraphElement>('#update-status')!;
+  btn.addEventListener('click', () => void applyUpdate(btn, status, updateSW));
   banner.querySelector('#btn-dismiss-update')?.addEventListener('click', () => banner.remove());
+}
+
+// Drive the reload ourselves rather than relying on vite-plugin-pwa's
+// isUpdate-gated reload, which does not fire reliably in an installed PWA.
+// Reload on the new worker reaching 'activated' OR on controllerchange; a long
+// safety timeout is the last resort. The reloaded guard prevents a double
+// reload. The NavigationRoute in sw.ts ensures the reloaded document is the
+// fresh precached index.html (not the stale HTTP-cached one). On dev hostnames
+// the banner subtitle shows a live lifecycle trace (no debugger on the phone).
+async function applyUpdate(
+  btn: HTMLButtonElement,
+  status: HTMLParagraphElement,
+  updateSW: (reloadPage?: boolean) => Promise<void>,
+): Promise<void> {
+  btn.disabled = true;
+  btn.textContent = 'Updating…';
+
+  const isDev = DEV_HOSTNAMES.has(window.location.hostname);
+  const trace = (msg: string): void => {
+    if (!isDev) return;
+    status.textContent = status.textContent ? `${status.textContent} → ${msg}` : msg;
+  };
+  if (isDev) status.textContent = '';
+  trace('start');
+
+  let reloaded = false;
+  const reloadOnce = (reason: string): void => {
+    if (reloaded) return;
+    reloaded = true;
+    trace(`reloading (${reason})`);
+    window.location.reload();
+  };
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener(
+      'controllerchange', () => reloadOnce('controllerchange'), { once: true });
+  }
+  // Last resort only — real progress comes from activation / controllerchange.
+  window.setTimeout(() => reloadOnce('timeout fallback'), 10000);
+
+  try {
+    await updateSW(true);
+  } catch { /* the signals below still guarantee progress */ }
+
+  if ('serviceWorker' in navigator) {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const waiting = reg?.waiting;
+      if (waiting) {
+        trace(`waiting (${waiting.state})`);
+        waiting.addEventListener('statechange', () => {
+          trace(waiting.state);
+          if (waiting.state === 'activated') reloadOnce('activated');
+        });
+        waiting.postMessage({ type: 'SKIP_WAITING' });
+      } else {
+        trace('no waiting worker found');
+      }
+    } catch { trace('getRegistration failed'); }
+  }
 }
 
 const updateSW = registerSW({
@@ -71,7 +137,7 @@ const updateSW = registerSW({
 
 function onPosted(): void {
   if (periodPostCount === 0) {
-    void idbSet('posted-trigger-ms', getLastTriggerTime().getTime());
+    void idbSet(IDB_KEYS.postedTriggerMs, getLastTriggerTime().getTime());
   }
   periodPostCount = Math.min(periodPostCount + 1, MAX_POSTS_PER_TRIGGER);
 }
@@ -170,8 +236,9 @@ function mount(screen: AppState | 'login'): void {
     renderInstallNudge();
   } else {
     app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid));
-    void renderNotificationNudge();
-    renderInstallNudge();
+    // Show only one bottom banner — both are fixed bottom-0 and would overlap.
+    const installShown = renderInstallNudge();
+    if (!installShown) void renderNotificationNudge();
   }
 }
 
@@ -216,15 +283,18 @@ async function init(): Promise<void> {
   // correct from the first render without any localStorage synchronisation logic.
   const auth = getAuthState();
   if (auth) {
+    // Mirror auth into IndexedDB so the service worker can fetch engagement on
+    // wake (it cannot read localStorage).
+    void idbSet(IDB_KEYS.auth, { instance: auth.instance, accessToken: auth.accessToken, accountId: auth.accountId });
     app.innerHTML = `
       <div class="flex items-center justify-center min-h-dvh">
-        <div class="w-8 h-8 border-[3px] border-gold/30 border-t-gold rounded-full animate-spin"></div>
+        <div class="w-8 h-8 spinner"></div>
       </div>
     `;
     try {
       periodPostCount = Math.min(await fetchTodayPostCount(auth), MAX_POSTS_PER_TRIGGER);
       if (periodPostCount > 0) {
-        void idbSet('posted-trigger-ms', getLastTriggerTime().getTime());
+        void idbSet(IDB_KEYS.postedTriggerMs, getLastTriggerTime().getTime());
       }
     } catch {
       periodPostCount = 0;

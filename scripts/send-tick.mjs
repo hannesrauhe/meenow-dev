@@ -18,12 +18,12 @@ const expired = [];
 for (const file of readdirSync(subsDir).filter(f => f.endsWith('.json'))) {
   const sub = JSON.parse(readFileSync(`${subsDir}/${file}`, 'utf8'));
   try {
-    await webpush.sendNotification(sub, payload, { TTL: 45 * 60 });
+    await webpush.sendNotification(sub, payload, { TTL: 45 * 60, urgency: 'high' });
     console.log(`Sent to ${file}`);
   } catch (err) {
-    // 404/410 = subscription expired or unregistered; 400 can also signal expiry on some push services
+    // 404/410 = expired/unregistered. 400 is not reliable expiry, so keep it.
     if (err instanceof Error && 'statusCode' in err &&
-        (err.statusCode === 410 || err.statusCode === 404 || err.statusCode === 400)) {
+        (err.statusCode === 410 || err.statusCode === 404)) {
       rmSync(`${subsDir}/${file}`);
       expired.push(file);
     } else {
