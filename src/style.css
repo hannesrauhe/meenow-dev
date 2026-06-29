@@ -24,8 +24,13 @@
   body {
     @apply bg-cream text-ink font-sans;
     -webkit-font-smoothing: antialiased;
-    /* Disable the browser's native pull-to-refresh (Android Chrome) so the
-       app's custom pull-to-refresh is the single gesture on every platform. */
+  }
+
+  /* Disable the browser's native pull-to-refresh (Android Chrome) so the app's
+     custom pull-to-refresh is the single gesture on every platform. Must target
+     the root scroller (html), not body — Chrome reads overscroll-behavior from
+     the element that scrolls the document. */
+  html {
     overscroll-behavior-y: contain;
   }
 

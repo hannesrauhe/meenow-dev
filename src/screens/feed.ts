@@ -144,10 +144,14 @@ function setupRefresh(el: HTMLElement, content: HTMLElement, auth: AuthState, po
     if (!pulling || refreshing) return;
     const dy = e.touches[0].clientY - startY;
     if (dy <= 0) { dist = 0; setPull(0); return; }
+    // Claim the downward pull so the browser cannot also run its native
+    // pull-to-refresh; only when genuinely pulling down from the top, so normal
+    // scrolling is never blocked. Requires a non-passive listener.
+    e.preventDefault();
     indicator.style.transition = '';
     dist = Math.min(PULL_MAX, dy * 0.5);
     setPull(dist);
-  }, { passive: true });
+  }, { passive: false });
   el.addEventListener('touchend', () => {
     if (!pulling) return;
     pulling = false;
