@@ -23,7 +23,7 @@ export function renderCircle(
   root.className = 'min-h-dvh flex flex-col bg-cream';
 
   const header = document.createElement('header');
-  header.className = 'sticky top-0 z-10 bg-cream/95 backdrop-blur-sm flex items-center gap-3 px-4 py-3 border-b border-ink/10';
+  header.className = 'sticky top-0 z-10 bg-cream/95 backdrop-blur-sm flex items-center gap-3 px-4 pb-3 pt-[calc(env(safe-area-inset-top,0px)+0.75rem)] border-b border-ink/10';
 
   const backBtn = document.createElement('button');
   backBtn.className = 'flex items-center gap-1 text-sm text-gold font-medium w-8 h-8 -ml-1';

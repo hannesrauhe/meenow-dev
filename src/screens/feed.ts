@@ -13,7 +13,7 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
   el.id = 'screen-feed';
 
   const header = document.createElement('header');
-  header.className = 'sticky top-0 z-10 bg-cream/95 backdrop-blur-sm flex items-center justify-between px-5 py-4 border-b border-ink/10';
+  header.className = 'sticky top-0 z-10 bg-cream/95 backdrop-blur-sm flex items-center justify-between px-5 pb-4 pt-[calc(env(safe-area-inset-top,0px)+1rem)] border-b border-ink/10';
   const atQuota = postCount >= MAX_POSTS_PER_TRIGGER;
   header.innerHTML = `
     <h1 class="text-xl font-semibold tracking-tight text-ink">meenow</h1>
