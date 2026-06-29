@@ -15,7 +15,7 @@ import type { FeedPost } from './api/pixelfed';
 import { renderInstallNudge, removeInstallNudge } from './components/installNudge';
 import { renderNotificationNudge, removeNotificationNudge } from './components/notificationNudge';
 import { registerSW } from 'virtual:pwa-register';
-import { idbSet } from './idb';
+import { idbSet, IDB_KEYS } from './idb';
 import { resubscribeIfNeeded } from './notifications';
 
 const app = document.getElementById('app')!;
@@ -137,7 +137,7 @@ const updateSW = registerSW({
 
 function onPosted(): void {
   if (periodPostCount === 0) {
-    void idbSet('posted-trigger-ms', getLastTriggerTime().getTime());
+    void idbSet(IDB_KEYS.postedTriggerMs, getLastTriggerTime().getTime());
   }
   periodPostCount = Math.min(periodPostCount + 1, MAX_POSTS_PER_TRIGGER);
 }
@@ -283,6 +283,9 @@ async function init(): Promise<void> {
   // correct from the first render without any localStorage synchronisation logic.
   const auth = getAuthState();
   if (auth) {
+    // Mirror auth into IndexedDB so the service worker can fetch engagement on
+    // wake (it cannot read localStorage).
+    void idbSet(IDB_KEYS.auth, { instance: auth.instance, accessToken: auth.accessToken, accountId: auth.accountId });
     app.innerHTML = `
       <div class="flex items-center justify-center min-h-dvh">
         <div class="w-8 h-8 spinner"></div>
@@ -291,7 +294,7 @@ async function init(): Promise<void> {
     try {
       periodPostCount = Math.min(await fetchTodayPostCount(auth), MAX_POSTS_PER_TRIGGER);
       if (periodPostCount > 0) {
-        void idbSet('posted-trigger-ms', getLastTriggerTime().getTime());
+        void idbSet(IDB_KEYS.postedTriggerMs, getLastTriggerTime().getTime());
       }
     } catch {
       periodPostCount = 0;
