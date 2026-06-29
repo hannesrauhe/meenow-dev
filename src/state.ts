@@ -47,6 +47,35 @@ export function setStoredVapidKey(key: string): void {
   localStorage.setItem('meenow:vapid-key', key);
 }
 
+// Records that the account has been ensured "locked" (manually approve followers)
+// for an instance, so the Circle screen doesn't re-PATCH on every open. Cleared on
+// logout so a fresh login re-applies. Instance-scoped because creds are per-instance.
+export function isLockedApplied(instance: string): boolean {
+  return localStorage.getItem(`meenow:locked-applied:${instance}`) === 'true';
+}
+
+export function setLockedApplied(instance: string): void {
+  localStorage.setItem(`meenow:locked-applied:${instance}`, 'true');
+}
+
+export function clearLockedApplied(instance: string): void {
+  localStorage.removeItem(`meenow:locked-applied:${instance}`);
+}
+
+// A handle from an invite deep link (?add=) that must survive the OAuth redirect
+// when the recipient is not yet logged in (redirect_uri carries no query string).
+export function getPendingAdd(): string | null {
+  return localStorage.getItem('meenow:pending-add');
+}
+
+export function setPendingAdd(handle: string): void {
+  localStorage.setItem('meenow:pending-add', handle);
+}
+
+export function clearPendingAdd(): void {
+  localStorage.removeItem('meenow:pending-add');
+}
+
 export function isInstallDismissed(): boolean {
   const raw = localStorage.getItem('meenow:install-dismiss');
   if (!raw) return false;
