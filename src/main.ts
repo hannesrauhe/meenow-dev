@@ -58,7 +58,7 @@ function showUpdateBanner(updateSW: (reloadPage?: boolean) => Promise<void>): vo
   banner.innerHTML = `
     <div class="flex-1 min-w-0">
       <p class="text-sm font-medium leading-snug">New version available</p>
-      <p class="text-xs text-cream/55 mt-0.5 leading-snug">Refresh to get the latest update.</p>
+      <p id="update-status" class="text-xs text-cream/55 mt-0.5 leading-snug">Refresh to get the latest update.</p>
     </div>
     <button id="btn-update" class="shrink-0 bg-gold text-ink rounded-full px-4 py-1.5 text-sm font-medium">Refresh</button>
     <button id="btn-dismiss-update" class="shrink-0 text-cream/40 text-xl leading-none" aria-label="Dismiss">&times;</button>
@@ -66,43 +66,68 @@ function showUpdateBanner(updateSW: (reloadPage?: boolean) => Promise<void>): vo
   document.body.appendChild(banner);
 
   const btn = banner.querySelector<HTMLButtonElement>('#btn-update')!;
-  btn.addEventListener('click', () => void applyUpdate(btn, updateSW));
+  const status = banner.querySelector<HTMLParagraphElement>('#update-status')!;
+  btn.addEventListener('click', () => void applyUpdate(btn, status, updateSW));
   banner.querySelector('#btn-dismiss-update')?.addEventListener('click', () => banner.remove());
 }
 
 // Drive the reload ourselves rather than relying on vite-plugin-pwa's
 // isUpdate-gated reload, which does not fire reliably in an installed PWA.
-// Forward progress is guaranteed by controllerchange OR a timeout fallback;
-// the reloaded guard prevents a double reload.
+// Reload on the new worker reaching 'activated' OR on controllerchange; a long
+// safety timeout is the last resort. The reloaded guard prevents a double
+// reload. The NavigationRoute in sw.ts ensures the reloaded document is the
+// fresh precached index.html (not the stale HTTP-cached one). On dev hostnames
+// the banner subtitle shows a live lifecycle trace (no debugger on the phone).
 async function applyUpdate(
   btn: HTMLButtonElement,
+  status: HTMLParagraphElement,
   updateSW: (reloadPage?: boolean) => Promise<void>,
 ): Promise<void> {
   btn.disabled = true;
   btn.textContent = 'Updating…';
 
+  const isDev = DEV_HOSTNAMES.has(window.location.hostname);
+  const trace = (msg: string): void => {
+    if (!isDev) return;
+    status.textContent = status.textContent ? `${status.textContent} → ${msg}` : msg;
+  };
+  if (isDev) status.textContent = '';
+  trace('start');
+
   let reloaded = false;
-  const reloadOnce = (): void => {
+  const reloadOnce = (reason: string): void => {
     if (reloaded) return;
     reloaded = true;
+    trace(`reloading (${reason})`);
     window.location.reload();
   };
 
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.addEventListener('controllerchange', reloadOnce, { once: true });
+    navigator.serviceWorker.addEventListener(
+      'controllerchange', () => reloadOnce('controllerchange'), { once: true });
   }
-  // Fallback for when the worker already activated (no controllerchange fires).
-  window.setTimeout(reloadOnce, 2500);
+  // Last resort only — real progress comes from activation / controllerchange.
+  window.setTimeout(() => reloadOnce('timeout fallback'), 10000);
 
   try {
     await updateSW(true);
-  } catch { /* fallbacks + timeout still guarantee progress */ }
+  } catch { /* the signals below still guarantee progress */ }
 
   if ('serviceWorker' in navigator) {
     try {
       const reg = await navigator.serviceWorker.getRegistration();
-      reg?.waiting?.postMessage({ type: 'SKIP_WAITING' });
-    } catch { /* ignore */ }
+      const waiting = reg?.waiting;
+      if (waiting) {
+        trace(`waiting (${waiting.state})`);
+        waiting.addEventListener('statechange', () => {
+          trace(waiting.state);
+          if (waiting.state === 'activated') reloadOnce('activated');
+        });
+        waiting.postMessage({ type: 'SKIP_WAITING' });
+      } else {
+        trace('no waiting worker found');
+      }
+    } catch { trace('getRegistration failed'); }
   }
 }
 

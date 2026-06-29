@@ -1,6 +1,11 @@
 // Service worker: Workbox precache/route and push-notification handler.
 import { clientsClaim } from 'workbox-core';
-import { precacheAndRoute } from 'workbox-precaching';
+import {
+  precacheAndRoute,
+  cleanupOutdatedCaches,
+  createHandlerBoundToURL,
+} from 'workbox-precaching';
+import { NavigationRoute, registerRoute } from 'workbox-routing';
 import { getLastTriggerTime } from './timer';
 import { idbGet, idbSet, IDB_KEYS, type StoredAuth } from './idb';
 import { fetchNewEngagement, fetchFriendsPostedCount } from './api/engagement';
@@ -10,6 +15,12 @@ declare const self: ServiceWorkerGlobalScope & {
 };
 
 precacheAndRoute(self.__WB_MANIFEST);
+cleanupOutdatedCaches();
+
+// Serve the freshly precached index.html for all navigations so a reload after
+// the new SW takes control loads the new hashed bundle, bypassing the GitHub
+// Pages / browser HTML cache. Precache key is "index.html" (no leading slash).
+registerRoute(new NavigationRoute(createHandlerBoundToURL('index.html')));
 
 // Take control of open clients on activate so skipWaiting() reloads the page
 // (controllerchange fires) — otherwise the update banner's Refresh does nothing.
