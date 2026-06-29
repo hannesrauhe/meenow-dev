@@ -1,11 +1,12 @@
 // Feed screen: main home feed showing today's meenow posts from followed accounts.
-import { SLEEPING_CAT, SPEECH_BUBBLE_ICON, GRID_ICON } from '../icons';
+import { SLEEPING_CAT, SPEECH_BUBBLE_ICON, GRID_ICON, PEOPLE_ICON } from '../icons';
 import { clearAuth, getAuthState, type AuthState } from '../api/auth';
 import { MAX_POSTS_PER_TRIGGER } from '../state';
 import { fetchMeenowFeed, type FeedPost } from '../api/pixelfed';
+import { fetchPendingRequestCount } from '../api/social';
 import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime, formatCountdown, formatRelativeTime } from '../timer';
 
-export function renderFeed(onRequestCapture: () => void, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenGrid: () => void): HTMLElement {
+export function renderFeed(onRequestCapture: () => void, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenGrid: () => void, onOpenCircle: () => void): HTMLElement {
   const auth = getAuthState();
   const el = document.createElement('div');
   el.className = 'min-h-dvh flex flex-col bg-cream';
@@ -19,6 +20,7 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
     <div class="flex items-center gap-3">
       ${!atQuota ? `<button id="btn-post-again" class="text-sm font-semibold text-gold">+ Post</button>` : ''}
       <span id="header-status" class="text-xs text-ink/40">${!atQuota ? `${postCount}/${MAX_POSTS_PER_TRIGGER} posted` : ''}</span>
+      <button id="btn-open-circle" class="relative w-6 h-6 text-ink/50 hover:text-ink transition-colors" aria-label="Your circle">${PEOPLE_ICON}</button>
       <button id="btn-open-grid" class="w-6 h-6 text-ink/50 hover:text-ink transition-colors" aria-label="My Photos">${GRID_ICON}</button>
     </div>
   `;
@@ -71,8 +73,20 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
 
   header.querySelector('#btn-post-again')?.addEventListener('click', onRequestCapture);
   header.querySelector('#btn-open-grid')?.addEventListener('click', onOpenGrid);
+  header.querySelector('#btn-open-circle')?.addEventListener('click', onOpenCircle);
 
-  if (auth) loadFeed(content, auth, postCount, onOpenPost);
+  if (auth) {
+    loadFeed(content, auth, postCount, onOpenPost);
+    // Mark the circle icon when follow requests are waiting.
+    void fetchPendingRequestCount(auth).then(count => {
+      const circleBtn = header.querySelector('#btn-open-circle');
+      if (count > 0 && circleBtn && circleBtn.isConnected) {
+        const dot = document.createElement('span');
+        dot.className = 'absolute -top-0.5 -right-0.5 w-2 h-2 bg-gold rounded-full';
+        circleBtn.appendChild(dot);
+      }
+    });
+  }
   return el;
 }
 

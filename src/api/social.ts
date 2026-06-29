@@ -1,0 +1,237 @@
+// Social graph client: handle resolution, follow/unfollow, relationships, follow
+// requests, peer connection lists, and account lock state. Encapsulates the
+// "one-tap mutual" semantics meenow uses for its small friend circles. SW-unsafe
+// (uses no DOM, but is app-only) — keep separate from pixelfed.ts, which owns the
+// post/feed lifecycle and its home-timeline cache.
+import type { AuthState } from './auth';
+
+export interface Connection {
+  id: string;          // account id on the user's instance (what follow/authorize take)
+  displayName: string;
+  username: string;
+  acct: string;        // "user" (local) or "user@instance" (remote)
+  avatarUrl: string;
+  url: string;
+}
+
+export interface Relationship {
+  id: string;
+  following: boolean;
+  followedBy: boolean;
+  requested: boolean;  // your outgoing follow is pending their approval
+  blocking: boolean;
+  blockedBy: boolean;
+}
+
+export type ConnectionKind = 'followers' | 'following';
+
+interface ApiAccount {
+  id: string;
+  username: string;
+  display_name: string;
+  acct: string;
+  avatar: string;
+  url: string;
+}
+
+interface ApiRelationship {
+  id: string;
+  following?: boolean;
+  followed_by?: boolean;
+  requested?: boolean;
+  blocking?: boolean;
+  blocked_by?: boolean;
+}
+
+function authHeaders(auth: AuthState): HeadersInit {
+  return { Authorization: `Bearer ${auth.accessToken}` };
+}
+
+function toConnection(a: ApiAccount): Connection {
+  return {
+    id: a.id,
+    displayName: a.display_name || a.username,
+    username: a.username,
+    acct: a.acct || a.username,
+    avatarUrl: a.avatar,
+    url: a.url,
+  };
+}
+
+function toRelationship(r: ApiRelationship): Relationship {
+  return {
+    id: r.id,
+    following: !!r.following,
+    followedBy: !!r.followed_by,
+    requested: !!r.requested,
+    blocking: !!r.blocking,
+    blockedBy: !!r.blocked_by,
+  };
+}
+
+// Resolve "user" or "user@instance" to an account on the user's instance,
+// triggering federation via WebFinger (resolve=true). Falls back to the
+// lookup endpoint, which is less consistent on Pixelfed. Returns null when no
+// exact match is found.
+export async function resolveHandle(auth: AuthState, handle: string): Promise<Connection | null> {
+  const q = handle.trim().replace(/^@/, '');
+  if (!q) return null;
+
+  try {
+    const url = new URL(`https://${auth.instance}/api/v1/accounts/search`);
+    url.searchParams.set('q', q);
+    url.searchParams.set('resolve', 'true');
+    url.searchParams.set('limit', '5');
+    const res = await fetch(url.toString(), { headers: authHeaders(auth) });
+    if (res.ok) {
+      const match = matchHandle(await res.json() as ApiAccount[], q);
+      if (match) return toConnection(match);
+    }
+  } catch { /* fall through to lookup */ }
+
+  try {
+    const url = new URL(`https://${auth.instance}/api/v1/accounts/lookup`);
+    url.searchParams.set('acct', q);
+    const res = await fetch(url.toString(), { headers: authHeaders(auth) });
+    if (res.ok) return toConnection(await res.json() as ApiAccount);
+  } catch { /* ignore */ }
+
+  return null;
+}
+
+function matchHandle(accounts: ApiAccount[], q: string): ApiAccount | undefined {
+  const lower = q.toLowerCase();
+  const byAcct = accounts.find(a => a.acct.toLowerCase() === lower);
+  if (byAcct) return byAcct;
+  // Only accept a bare-username match when the query carried no domain, so a
+  // search for "alice@other" never silently resolves to a local "alice".
+  if (!lower.includes('@')) return accounts.find(a => a.username.toLowerCase() === lower);
+  return undefined;
+}
+
+export async function follow(auth: AuthState, accountId: string): Promise<Relationship> {
+  const res = await fetch(`https://${auth.instance}/api/v1/accounts/${accountId}/follow`, {
+    method: 'POST',
+    headers: authHeaders(auth),
+  });
+  if (!res.ok) throw new Error(`Follow failed (${res.status})`);
+  return toRelationship(await res.json() as ApiRelationship);
+}
+
+export async function unfollow(auth: AuthState, accountId: string): Promise<Relationship> {
+  const res = await fetch(`https://${auth.instance}/api/v1/accounts/${accountId}/unfollow`, {
+    method: 'POST',
+    headers: authHeaders(auth),
+  });
+  if (!res.ok) throw new Error(`Unfollow failed (${res.status})`);
+  return toRelationship(await res.json() as ApiRelationship);
+}
+
+export async function fetchRelationships(auth: AuthState, ids: string[]): Promise<Map<string, Relationship>> {
+  const map = new Map<string, Relationship>();
+  const unique = [...new Set(ids)].filter(Boolean);
+  for (let i = 0; i < unique.length; i += 40) {
+    const chunk = unique.slice(i, i + 40);
+    const url = new URL(`https://${auth.instance}/api/v1/accounts/relationships`);
+    chunk.forEach(id => url.searchParams.append('id[]', id));
+    try {
+      const res = await fetch(url.toString(), { headers: authHeaders(auth) });
+      if (!res.ok) continue;
+      (await res.json() as ApiRelationship[]).forEach(r => map.set(r.id, toRelationship(r)));
+    } catch { /* skip this chunk */ }
+  }
+  return map;
+}
+
+export async function fetchFollowRequests(auth: AuthState): Promise<Connection[]> {
+  const res = await fetch(`https://${auth.instance}/api/v1/follow_requests?limit=40`, {
+    headers: authHeaders(auth),
+  });
+  if (!res.ok) throw new Error(`Could not load requests (${res.status})`);
+  return (await res.json() as ApiAccount[]).map(toConnection);
+}
+
+// :id is the requester's account id; returns the resulting relationship.
+export async function authorizeFollowRequest(auth: AuthState, accountId: string): Promise<Relationship> {
+  const res = await fetch(`https://${auth.instance}/api/v1/follow_requests/${accountId}/authorize`, {
+    method: 'POST',
+    headers: authHeaders(auth),
+  });
+  if (!res.ok) throw new Error(`Authorize failed (${res.status})`);
+  return toRelationship(await res.json() as ApiRelationship);
+}
+
+export async function rejectFollowRequest(auth: AuthState, accountId: string): Promise<void> {
+  const res = await fetch(`https://${auth.instance}/api/v1/follow_requests/${accountId}/reject`, {
+    method: 'POST',
+    headers: authHeaders(auth),
+  });
+  if (!res.ok) throw new Error(`Reject failed (${res.status})`);
+}
+
+// Throws on a genuine non-2xx so the user's own circle can show a retry;
+// hide_collections returns an empty 200, so peer screens see [] naturally and
+// can additionally treat a thrown error as "nothing to show".
+export async function fetchConnections(auth: AuthState, accountId: string, kind: ConnectionKind): Promise<Connection[]> {
+  const res = await fetch(`https://${auth.instance}/api/v1/accounts/${accountId}/${kind}?limit=40`, {
+    headers: authHeaders(auth),
+  });
+  if (!res.ok) throw new Error(`Could not load ${kind} (${res.status})`);
+  return (await res.json() as ApiAccount[]).map(toConnection);
+}
+
+export async function fetchMyAccount(auth: AuthState): Promise<{ id: string; acct: string; locked: boolean }> {
+  const res = await fetch(`https://${auth.instance}/api/v1/accounts/verify_credentials`, {
+    headers: authHeaders(auth),
+  });
+  if (!res.ok) throw new Error(`Could not load account (${res.status})`);
+  const a = await res.json() as { id: string; acct: string; locked?: boolean };
+  return { id: a.id, acct: a.acct, locked: !!a.locked };
+}
+
+export async function setAccountLocked(auth: AuthState, locked: boolean): Promise<boolean> {
+  const form = new FormData();
+  form.append('locked', String(locked));
+  const res = await fetch(`https://${auth.instance}/api/v1/accounts/update_credentials`, {
+    method: 'PATCH',
+    headers: authHeaders(auth),
+    body: form,
+  });
+  return res.ok;
+}
+
+// --- One-tap mutual helpers (single shared path for every entry point) ---
+
+// Outgoing half: follow them. Their acceptance + back-follow completes the circle.
+export function connectTo(auth: AuthState, accountId: string): Promise<Relationship> {
+  return follow(auth, accountId);
+}
+
+// Accepting an incoming request: authorize them (they can see your posts), then
+// auto-follow back (you can see theirs, or it queues if they're also locked).
+// If the back-follow fails, the authorize already succeeded — callers surface a
+// non-fatal state rather than rolling back.
+export async function acceptAndBackFollow(auth: AuthState, accountId: string): Promise<Relationship> {
+  await authorizeFollowRequest(auth, accountId);
+  return follow(auth, accountId);
+}
+
+// --- Pending follow-request count (drives the feed-header badge) ---
+
+let _reqCache: { count: number; fetchedAt: number } | null = null;
+const REQ_CACHE_TTL_MS = 30_000;
+
+export async function fetchPendingRequestCount(auth: AuthState): Promise<number> {
+  if (_reqCache && Date.now() - _reqCache.fetchedAt < REQ_CACHE_TTL_MS) return _reqCache.count;
+  try {
+    const count = (await fetchFollowRequests(auth)).length;
+    _reqCache = { count, fetchedAt: Date.now() };
+    return count;
+  } catch {
+    return _reqCache?.count ?? 0;
+  }
+}
+
+export function invalidatePendingRequestCache(): void {
+  _reqCache = null;
+}
