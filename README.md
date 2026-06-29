@@ -76,7 +76,7 @@ No hardcoded `client_id` or `client_secret`. On first use with a given instance:
 ### Posting
 
 1. Upload composite image via `POST /api/v1/media` (sequential first to guarantee gallery ordering), then back and front photos in parallel.
-2. `POST /api/v1/statuses` with `visibility: "private"` and caption `#meenowApp`.
+2. `POST /api/v1/statuses` with `visibility: "private"` (Mastodon API terminology for followers-only). The status body is an optional free-text caption and an optional location pill (reverse-geocoded to city level via Nominatim), followed by the `#meenowApp` tag, which is always appended so feed filtering keeps working.
 3. Increment the in-memory `periodPostCount` (no localStorage write; the server is the source of truth).
 
 ### Feed
@@ -85,6 +85,10 @@ No hardcoded `client_id` or `client_secret`. On first use with a given instance:
 - Filtered to the current trigger period (posts since the last trigger time); only statuses tagged `#meenowApp` are shown.
 - If the user has not posted in the current trigger period: images are blurred with a “Post yours to unblur” prompt.
 - Empty state: sleeping cat illustration.
+
+### Push Notifications
+
+Standard Web Push (VAPID), with no backend. A GitHub Actions cron job (`scripts/send-tick.mjs` + `.github/workflows/send-tick.yml`) sends a generic tick to every stored subscription every 30 minutes during a daytime UTC window and prunes expired endpoints. Subscriptions are stored in a separate relay repository, written directly from the client. All scheduling logic stays client-side: the service worker shows a notification on each tick until the user has posted in the current trigger period (state shared with the SW via IndexedDB). Once the user has posted, otherwise-silent ticks are turned into engagement digests ("3 likes · 1 reply on your meenow"). See `CLAUDE.md` for the full push architecture.
 
 ---
 
@@ -103,4 +107,4 @@ npm install
 npm run dev
 ```
 
-Deployed automatically to GitHub Pages on push to `main` via GitHub Actions.
+Deployed automatically to GitHub Pages on every push to any branch via GitHub Actions (`.github/workflows/deploy.yml`). The dev repo (`dev.meenow.de`) deploys immediately; the production repo (`meenow.de`) uses the same workflow but pauses for manual approval via the `github-pages` environment protection rule. See `CLAUDE.md` for the two-repo deployment details.
