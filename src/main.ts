@@ -76,12 +76,14 @@ function showUpdateBanner(updateSW: (reloadPage?: boolean) => Promise<void>): vo
 }
 
 // Drive the reload ourselves rather than relying on vite-plugin-pwa's
-// isUpdate-gated reload, which does not fire reliably in an installed PWA.
-// Reload on the new worker reaching 'activated' OR on controllerchange; a long
-// safety timeout is the last resort. The reloaded guard prevents a double
-// reload. The NavigationRoute in sw.ts ensures the reloaded document is the
-// fresh precached index.html (not the stale HTTP-cached one). On dev hostnames
-// the banner subtitle shows a live lifecycle trace (no debugger on the phone).
+// isUpdate-gated reload, which does not fire reliably in an installed PWA. The
+// SKIP_WAITING handshake and its reload triggers (controllerchange, or the new
+// worker reaching 'activated') are armed BEFORE updateSW runs, so a fast
+// activation cannot fire before we are listening. If activation never happens
+// we do NOT blindly reload: reloading into the still-old controller masks the
+// failure (and on dev scrolls away the lifecycle trace). We reload only when
+// the controller actually changed, otherwise we tell the user to relaunch the
+// app. On dev hostnames the banner subtitle shows a live lifecycle trace.
 async function applyUpdate(
   btn: HTMLButtonElement,
   status: HTMLParagraphElement,
@@ -98,6 +100,9 @@ async function applyUpdate(
   if (isDev) status.textContent = '';
   trace('start');
 
+  const hasSW = 'serviceWorker' in navigator;
+  const startController = hasSW ? navigator.serviceWorker.controller : null;
+
   let reloaded = false;
   const reloadOnce = (reason: string): void => {
     if (reloaded) return;
@@ -106,33 +111,48 @@ async function applyUpdate(
     window.location.reload();
   };
 
-  if ('serviceWorker' in navigator) {
+  if (hasSW) {
     navigator.serviceWorker.addEventListener(
       'controllerchange', () => reloadOnce('controllerchange'), { once: true });
   }
-  // Last resort only — real progress comes from activation / controllerchange.
-  window.setTimeout(() => reloadOnce('timeout fallback'), 10000);
 
-  try {
-    await updateSW(true);
-  } catch { /* the signals below still guarantee progress */ }
+  // Last resort: only reload if the new worker actually took control. Reloading
+  // unconditionally would re-load the stale controller and look like a no-op.
+  window.setTimeout(() => {
+    if (reloaded) return;
+    const controller = hasSW ? navigator.serviceWorker.controller : null;
+    if (controller && controller !== startController) {
+      reloadOnce('controller changed');
+      return;
+    }
+    trace('stalled');
+    btn.disabled = false;
+    btn.textContent = 'Reopen app';
+    const note = 'Update didn’t apply — fully close the app and reopen to finish.';
+    status.textContent = isDev && status.textContent ? `${status.textContent} → ${note}` : note;
+  }, 10000);
 
-  if ('serviceWorker' in navigator) {
+  if (hasSW) {
     try {
       const reg = await navigator.serviceWorker.getRegistration();
-      const waiting = reg?.waiting;
-      if (waiting) {
-        trace(`waiting (${waiting.state})`);
-        waiting.addEventListener('statechange', () => {
-          trace(waiting.state);
-          if (waiting.state === 'activated') reloadOnce('activated');
+      const sw = reg?.waiting ?? reg?.installing ?? null;
+      if (sw) {
+        trace(`${reg?.waiting ? 'waiting' : 'installing'} (${sw.state})`);
+        sw.addEventListener('statechange', () => {
+          trace(sw.state);
+          if (sw.state === 'activated') reloadOnce('activated');
         });
-        waiting.postMessage({ type: 'SKIP_WAITING' });
+        sw.postMessage({ type: 'SKIP_WAITING' });
       } else {
-        trace('no waiting worker found');
+        trace('no waiting/installing worker found');
       }
     } catch { trace('getRegistration failed'); }
   }
+
+  // Best-effort: let the plugin run its own handshake too, but we drive reload.
+  try {
+    await updateSW(false);
+  } catch { /* our own signals still guarantee progress */ }
 }
 
 const updateSW = registerSW({
