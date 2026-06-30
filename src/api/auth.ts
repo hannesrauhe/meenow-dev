@@ -1,5 +1,5 @@
 // OAuth PKCE auth: client registration, login flow, token/accountId storage, and auth state helpers.
-import { clearPushSubFilename } from '../state';
+import { clearPushSubFilename, clearLockedApplied, clearPendingAdd } from '../state';
 import { idbDelete, IDB_KEYS } from '../idb';
 
 const PREFIX = 'meenow:auth:';
@@ -124,10 +124,12 @@ export function clearAuth(): void {
     localStorage.removeItem(key(instance, 'token'));
     localStorage.removeItem(key(instance, 'accountId'));
     localStorage.removeItem(key(instance, 'creds'));
+    clearLockedApplied(instance);
   }
   localStorage.removeItem(`${PREFIX}instance`);
   localStorage.removeItem(`${PREFIX}pending-instance`);
   localStorage.removeItem(`${PREFIX}verifier`);
+  clearPendingAdd();
   clearPushSubFilename();
   localStorage.removeItem('meenow:pwa-subbed');
   // Drop the SW's mirrored auth and engagement-digest state.

@@ -4,11 +4,15 @@ declare const __GIT_HASH__: string;
 import './style.css';
 import { getAuthState, handleOAuthCallback } from './api/auth';
 import { getLastTriggerTime, type AppState } from './timer';
-import { MAX_POSTS_PER_TRIGGER } from './state';
+import { MAX_POSTS_PER_TRIGGER, getPendingAdd, setPendingAdd, clearPendingAdd } from './state';
 import { fetchTodayPostCount, deletePost, removePostFromCache } from './api/pixelfed';
+import type { Connection } from './api/social';
 import { renderCapture } from './screens/capture';
 import { renderFeed } from './screens/feed';
 import { renderGrid } from './screens/grid';
+import { renderCircle } from './screens/circle';
+import { renderPeerConnections } from './screens/peerConnections';
+import { renderConnectLanding } from './screens/connectLanding';
 import { renderLogin } from './screens/login';
 import { renderPostDetail } from './screens/postDetail';
 import type { FeedPost } from './api/pixelfed';
@@ -19,7 +23,7 @@ import { idbSet, IDB_KEYS } from './idb';
 import { resubscribeIfNeeded } from './notifications';
 
 const app = document.getElementById('app')!;
-type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'grid';
+type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'grid' | 'circle' | 'peer' | 'connect';
 const BASE_SCREENS = new Set<Screen>(['feed', 'login']);
 let activeScreen: Screen | null = null;
 let tickId: number | null = null;
@@ -228,6 +232,74 @@ function mountGrid(): void {
   app.appendChild(renderGrid(auth, openPost, onBack));
 }
 
+// The circle hub, with nested peer-connection navigation (same pattern as
+// mountGrid → mountPostDetail): hardware back from a peer list returns to the
+// circle, not the feed.
+function mountCircle(): void {
+  const auth = getAuthState();
+  if (!auth) return;
+  activeScreen = 'circle';
+  app.innerHTML = '';
+  removeInstallNudge();
+  removeNotificationNudge();
+
+  history.pushState({ screen: 'circle' }, '');
+
+  let popHandler: (() => void) | null = null;
+  const installPop = (): void => {
+    popHandler = () => { popHandler = null; activeScreen = null; tick(); };
+    window.addEventListener('popstate', popHandler, { once: true });
+  };
+
+  const openPeer = (peer: Connection): void => {
+    if (popHandler) { window.removeEventListener('popstate', popHandler); popHandler = null; }
+    mountPeerConnections(peer, () => {
+      activeScreen = 'circle';
+      app.innerHTML = '';
+      installPop();
+      app.appendChild(renderCircle(auth, onBack, openPeer));
+    });
+  };
+
+  const onBack = (): void => { history.back(); };
+
+  installPop();
+  app.appendChild(renderCircle(auth, onBack, openPeer));
+}
+
+function mountPeerConnections(peer: Connection, onClose?: () => void): void {
+  const auth = getAuthState();
+  if (!auth) return;
+  activeScreen = 'peer';
+  app.innerHTML = '';
+  removeInstallNudge();
+  removeNotificationNudge();
+
+  history.pushState({ screen: 'peer' }, '');
+
+  const returnTo = onClose ?? tick;
+  const onPopState = () => { activeScreen = null; returnTo(); };
+  window.addEventListener('popstate', onPopState, { once: true });
+
+  app.appendChild(renderPeerConnections(auth, peer, () => { history.back(); }));
+}
+
+function mountConnectLanding(handle: string): void {
+  const auth = getAuthState();
+  if (!auth) return;
+  activeScreen = 'connect';
+  app.innerHTML = '';
+  removeInstallNudge();
+  removeNotificationNudge();
+
+  history.pushState({ screen: 'connect' }, '');
+
+  const onPopState = () => { activeScreen = null; tick(); };
+  window.addEventListener('popstate', onPopState, { once: true });
+
+  app.appendChild(renderConnectLanding(auth, handle, () => { history.back(); }));
+}
+
 function mount(screen: AppState | 'login'): void {
   app.innerHTML = '';
   if (screen === 'login') {
@@ -235,7 +307,7 @@ function mount(screen: AppState | 'login'): void {
     app.appendChild(renderLogin());
     renderInstallNudge();
   } else {
-    app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid));
+    app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid, mountCircle));
     // Show only one bottom banner — both are fixed bottom-0 and would overlap.
     const installShown = renderInstallNudge();
     if (!installShown) void renderNotificationNudge();
@@ -265,14 +337,20 @@ function tick(): void {
 async function init(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
   const code = params.get('code');
-  if (code) {
+  const add = params.get('add');
+  if (code || add) {
     history.replaceState({}, '', window.location.pathname);
+  }
+  if (code) {
     try {
       await handleOAuthCallback(code);
     } catch (err) {
       console.error('OAuth callback error:', err);
     }
   }
+  // Persist an invite handle so it survives the OAuth redirect (redirect_uri has
+  // no query string); it is consumed below once authenticated.
+  if (add) setPendingAdd(add);
 
   // Re-subscribe if the VAPID key was rotated or if the subscription was created
   // in a browser tab and needs to be re-created in the installed PWA context.
@@ -303,6 +381,14 @@ async function init(): Promise<void> {
 
   tick();
   tickId = window.setInterval(tick, 1000);
+
+  // Once authenticated and the feed is up, open the invite landing for any
+  // handle carried in via ?add= (directly, or through the login redirect).
+  const pendingAdd = getPendingAdd();
+  if (pendingAdd && getAuthState()) {
+    clearPendingAdd();
+    mountConnectLanding(pendingAdd);
+  }
 }
 
 init();

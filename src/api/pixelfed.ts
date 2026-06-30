@@ -128,6 +128,14 @@ export async function postMeenow(
   });
   if (!res.ok) throw new Error(`Post failed (${res.status})`);
   const statusData = await res.json() as MastodonStatus;
+  // Pixelfed's create-status response can omit the parsed hashtags, which would
+  // make the new post fail the feed's #meenowApp filter (and stay hidden through
+  // pull-to-refresh, since the cache dedups by id) until a full reload rebuilds
+  // the cache from the timeline. We know we just posted it with the tag, so
+  // ensure it is present on the object we cache.
+  if (!(statusData.tags ?? []).some(t => t.name.toLowerCase() === 'meenowapp')) {
+    statusData.tags = [...(statusData.tags ?? []), { name: 'meenowApp' }];
+  }
   // Prepend the new post so the feed shows it immediately without a re-fetch.
   // newestId advances so the next incremental fetch uses it as since_id.
   if (_homeCache) {
@@ -211,7 +219,7 @@ async function resolveAccountId(auth: AuthState): Promise<string | undefined> {
 }
 
 function hasMeenowTag(s: MastodonStatus): boolean {
-  return s.tags.some(t => t.name.toLowerCase() === 'meenowapp');
+  return (s.tags ?? []).some(t => t.name.toLowerCase() === 'meenowapp');
 }
 
 function parseStatusParts(htmlContent: string): { caption: string; location: string } {

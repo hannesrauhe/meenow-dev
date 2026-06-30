@@ -1,24 +1,26 @@
 // Feed screen: main home feed showing today's meenow posts from followed accounts.
-import { SLEEPING_CAT, SPEECH_BUBBLE_ICON, GRID_ICON } from '../icons';
+import { SLEEPING_CAT, SPEECH_BUBBLE_ICON, GRID_ICON, PEOPLE_ICON } from '../icons';
 import { clearAuth, getAuthState, type AuthState } from '../api/auth';
 import { MAX_POSTS_PER_TRIGGER } from '../state';
 import { fetchMeenowFeed, type FeedPost } from '../api/pixelfed';
+import { fetchPendingRequestCount } from '../api/social';
 import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime, formatCountdown, formatRelativeTime } from '../timer';
 
-export function renderFeed(onRequestCapture: () => void, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenGrid: () => void): HTMLElement {
+export function renderFeed(onRequestCapture: () => void, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenGrid: () => void, onOpenCircle: () => void): HTMLElement {
   const auth = getAuthState();
   const el = document.createElement('div');
   el.className = 'min-h-dvh flex flex-col bg-cream';
   el.id = 'screen-feed';
 
   const header = document.createElement('header');
-  header.className = 'sticky top-0 z-10 bg-cream/95 backdrop-blur-sm flex items-center justify-between px-5 py-4 border-b border-ink/10';
+  header.className = 'sticky top-0 z-10 bg-cream/95 backdrop-blur-sm flex items-center justify-between px-5 pb-4 pt-[calc(env(safe-area-inset-top,0px)+1rem)] border-b border-ink/10';
   const atQuota = postCount >= MAX_POSTS_PER_TRIGGER;
   header.innerHTML = `
     <h1 class="text-xl font-semibold tracking-tight text-ink">meenow</h1>
     <div class="flex items-center gap-3">
       ${!atQuota ? `<button id="btn-post-again" class="text-sm font-semibold text-gold">+ Post</button>` : ''}
       <span id="header-status" class="text-xs text-ink/40">${!atQuota ? `${postCount}/${MAX_POSTS_PER_TRIGGER} posted` : ''}</span>
+      <button id="btn-open-circle" class="relative w-6 h-6 text-ink/50 hover:text-ink transition-colors" aria-label="Your circle">${PEOPLE_ICON}</button>
       <button id="btn-open-grid" class="w-6 h-6 text-ink/50 hover:text-ink transition-colors" aria-label="My Photos">${GRID_ICON}</button>
     </div>
   `;
@@ -71,23 +73,126 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
 
   header.querySelector('#btn-post-again')?.addEventListener('click', onRequestCapture);
   header.querySelector('#btn-open-grid')?.addEventListener('click', onOpenGrid);
+  header.querySelector('#btn-open-circle')?.addEventListener('click', onOpenCircle);
 
-  if (auth) loadFeed(content, auth, postCount, onOpenPost);
+  if (auth) {
+    setupRefresh(el, content, auth, postCount, onOpenPost);
+    loadFeed(content, auth, postCount, onOpenPost);
+    // Mark the circle icon when follow requests are waiting.
+    void fetchPendingRequestCount(auth).then(count => {
+      const circleBtn = header.querySelector('#btn-open-circle');
+      if (count > 0 && circleBtn && circleBtn.isConnected) {
+        const dot = document.createElement('span');
+        dot.className = 'absolute -top-0.5 -right-0.5 w-2 h-2 bg-gold rounded-full';
+        circleBtn.appendChild(dot);
+      }
+    });
+  }
   return el;
 }
 
-async function loadFeed(container: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void): Promise<void> {
+// Pull-to-refresh + foreground refresh. iOS standalone PWAs have no native
+// pull-to-refresh, and Android's is disabled via overscroll-behavior (style.css),
+// so this custom gesture is the single source of truth on both platforms.
+function setupRefresh(el: HTMLElement, content: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void): void {
+  const PULL_THRESHOLD = 70; // px of (damped) pull needed to trigger a refresh
+  const PULL_MAX = 110;
+  let refreshing = false;
 
-  container.innerHTML = `
-    <div class="flex items-center justify-center py-20">
-      <div class="w-8 h-8 spinner"></div>
-    </div>
-  `;
+  const indicator = document.createElement('div');
+  indicator.className = 'fixed left-1/2 z-20 pointer-events-none top-[calc(env(safe-area-inset-top,0px)+4rem)]';
+  indicator.style.opacity = '0';
+  indicator.style.transform = 'translateX(-50%) translateY(0) scale(0.6)';
+  indicator.innerHTML = '<div class="w-7 h-7 spinner"></div>';
+  el.appendChild(indicator);
+
+  const setPull = (d: number): void => {
+    const p = Math.min(1, d / PULL_THRESHOLD);
+    indicator.style.opacity = String(p);
+    indicator.style.transform = `translateX(-50%) translateY(${d}px) scale(${0.6 + 0.4 * p})`;
+  };
+  const resetPull = (): void => {
+    indicator.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+    indicator.style.opacity = '0';
+    indicator.style.transform = 'translateX(-50%) translateY(0) scale(0.6)';
+    setTimeout(() => { indicator.style.transition = ''; }, 220);
+  };
+
+  const refresh = async (): Promise<void> => {
+    if (refreshing) return;
+    refreshing = true;
+    indicator.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+    indicator.style.opacity = '1';
+    indicator.style.transform = `translateX(-50%) translateY(${Math.round(PULL_THRESHOLD * 0.6)}px) scale(1)`;
+    try {
+      await loadFeed(content, auth, postCount, onOpenPost, true);
+    } finally {
+      resetPull();
+      refreshing = false;
+    }
+  };
+
+  let startY = 0;
+  let pulling = false;
+  let dist = 0;
+  el.addEventListener('touchstart', (e: TouchEvent) => {
+    if (refreshing) return;
+    const top = document.scrollingElement?.scrollTop ?? window.scrollY;
+    if (top <= 0) { startY = e.touches[0].clientY; pulling = true; dist = 0; }
+  }, { passive: true });
+  el.addEventListener('touchmove', (e: TouchEvent) => {
+    if (!pulling || refreshing) return;
+    const dy = e.touches[0].clientY - startY;
+    if (dy <= 0) { dist = 0; setPull(0); return; }
+    // Claim the downward pull so the browser cannot also run its native
+    // pull-to-refresh; only when genuinely pulling down from the top, so normal
+    // scrolling is never blocked. Requires a non-passive listener.
+    e.preventDefault();
+    indicator.style.transition = '';
+    dist = Math.min(PULL_MAX, dy * 0.5);
+    setPull(dist);
+  }, { passive: false });
+  el.addEventListener('touchend', () => {
+    if (!pulling) return;
+    pulling = false;
+    if (dist >= PULL_THRESHOLD) void refresh();
+    else resetPull();
+    dist = 0;
+  });
+
+  // Refresh when the app/tab returns to the foreground. Self-cleans once the
+  // feed element is no longer in the DOM (next event after unmount).
+  const onPageShow = (e: PageTransitionEvent): void => { if (e.persisted) onForeground(); };
+  function onForeground(): void {
+    if (!el.isConnected) {
+      document.removeEventListener('visibilitychange', onForeground);
+      window.removeEventListener('pageshow', onPageShow);
+      return;
+    }
+    if (document.visibilityState === 'visible') void refresh();
+  }
+  document.addEventListener('visibilitychange', onForeground);
+  window.addEventListener('pageshow', onPageShow);
+}
+
+// `silent` skips the full-screen spinner and keeps the existing cards on screen
+// (used by pull-to-refresh and foreground refresh, where the loading cue lives
+// elsewhere); on failure it leaves the current feed untouched.
+async function loadFeed(container: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void, silent = false): Promise<void> {
+
+  if (!silent) {
+    container.innerHTML = `
+      <div class="flex items-center justify-center py-20">
+        <div class="w-8 h-8 spinner"></div>
+      </div>
+    `;
+  }
 
   let posts: FeedPost[];
   try {
     posts = await fetchMeenowFeed(auth);
   } catch {
+    if (silent) return;
     container.innerHTML = `
       <div class="flex flex-col items-center py-16 gap-3 text-center px-6">
         <p class="text-sm text-ink/50">Could not load the feed.</p>
