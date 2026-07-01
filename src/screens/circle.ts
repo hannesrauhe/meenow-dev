@@ -201,17 +201,21 @@ function makeRequestsSection(auth: AuthState, requests: Connection[], reload: ()
         // back-follow is now queued on their side.
         resolved(actions, rel.following && rel.followedBy ? 'Connected' : 'Accepted');
       } catch {
-        accept.disabled = false; reject.disabled = false; accept.textContent = 'Accept';
+        // A failed request is otherwise indistinguishable from a tap that did
+        // nothing, so show it was tried and failed rather than reverting silently.
+        accept.textContent = 'Try again';
+        accept.disabled = false; reject.disabled = false;
       }
     });
 
     reject.addEventListener('click', async () => {
-      accept.disabled = true; reject.disabled = true;
+      accept.disabled = true; reject.disabled = true; reject.textContent = '…';
       try {
         await rejectFollowRequest(auth, req.id);
         invalidatePendingRequestCache();
         resolved(actions, 'Declined');
       } catch {
+        reject.textContent = 'Try again';
         accept.disabled = false; reject.disabled = false;
       }
     });
