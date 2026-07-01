@@ -117,13 +117,27 @@ function matchHandle(accounts: ApiAccount[], q: string): ApiAccount | undefined 
   return undefined;
 }
 
+// Pixelfed doesn't reliably return a usable relationship body from follow/unfollow
+// (sometimes empty), which would otherwise throw on res.json() despite the action
+// having succeeded and make the button revert as if the tap had failed. Fall back
+// to an authoritative relationships lookup when the body doesn't parse.
+async function parseRelationship(auth: AuthState, res: Response, accountId: string): Promise<Relationship> {
+  try {
+    return toRelationship(await res.json() as ApiRelationship);
+  } catch {
+    const rel = (await fetchRelationships(auth, [accountId])).get(accountId);
+    if (rel) return rel;
+    throw new Error('No relationship in response');
+  }
+}
+
 export async function follow(auth: AuthState, accountId: string): Promise<Relationship> {
   const res = await fetch(`https://${auth.instance}/api/v1/accounts/${accountId}/follow`, {
     method: 'POST',
     headers: authHeaders(auth),
   });
   if (!res.ok) throw new Error(`Follow failed (${res.status})`);
-  return toRelationship(await res.json() as ApiRelationship);
+  return parseRelationship(auth, res, accountId);
 }
 
 export async function unfollow(auth: AuthState, accountId: string): Promise<Relationship> {
@@ -132,7 +146,7 @@ export async function unfollow(auth: AuthState, accountId: string): Promise<Rela
     headers: authHeaders(auth),
   });
   if (!res.ok) throw new Error(`Unfollow failed (${res.status})`);
-  return toRelationship(await res.json() as ApiRelationship);
+  return parseRelationship(auth, res, accountId);
 }
 
 export async function fetchRelationships(auth: AuthState, ids: string[]): Promise<Map<string, Relationship>> {
