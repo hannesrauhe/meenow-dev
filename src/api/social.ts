@@ -74,8 +74,16 @@ function toRelationship(r: ApiRelationship): Relationship {
 // lookup endpoint, which is less consistent on Pixelfed. Returns null when no
 // exact match is found.
 export async function resolveHandle(auth: AuthState, handle: string): Promise<Connection | null> {
-  const q = handle.trim().replace(/^@/, '');
+  let q = handle.trim().replace(/^@/, '');
   if (!q) return null;
+  // A handle qualified with the caller's own instance (e.g. from an invite link
+  // built by a same-instance friend) is local: the API returns its acct bare
+  // (no domain), so strip the domain here rather than in matchHandle, which
+  // otherwise treats any domain-qualified query as remote-only.
+  const at = q.lastIndexOf('@');
+  if (at > 0 && q.slice(at + 1).toLowerCase() === auth.instance.toLowerCase()) {
+    q = q.slice(0, at);
+  }
 
   try {
     const url = new URL(`https://${auth.instance}/api/v1/accounts/search`);
