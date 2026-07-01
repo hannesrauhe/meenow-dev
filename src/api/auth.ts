@@ -4,6 +4,12 @@ import { idbDelete, IDB_KEYS } from '../idb';
 
 const PREFIX = 'meenow:auth:';
 
+// Pixelfed enforces `tokenCan('follow')` (Laravel Passport, exact-match — `write`
+// does NOT imply it) on every relationship write: follow, unfollow, and follow-
+// request authorize/reject. `read write` alone yields a 403 on all of them, so
+// the `follow` scope must be requested explicitly and saved at app registration.
+const OAUTH_SCOPES = 'read write follow';
+
 export interface AuthState {
   instance: string;
   accessToken: string;
@@ -32,7 +38,12 @@ async function sha256Base64Url(s: string): Promise<string> {
 
 async function ensureAppRegistered(instance: string): Promise<{ clientId: string; clientSecret: string }> {
   const stored = localStorage.getItem(key(instance, 'creds'));
-  if (stored) return JSON.parse(stored) as { clientId: string; clientSecret: string };
+  if (stored) {
+    const creds = JSON.parse(stored) as { clientId: string; clientSecret: string; scopes?: string };
+    // Re-register when the requested scope set has changed: Pixelfed rejects an
+    // authorize request for any scope not saved when the app was registered.
+    if (creds.scopes === OAUTH_SCOPES) return { clientId: creds.clientId, clientSecret: creds.clientSecret };
+  }
 
   const res = await fetch(`https://${instance}/api/v1/apps`, {
     method: 'POST',
@@ -40,16 +51,16 @@ async function ensureAppRegistered(instance: string): Promise<{ clientId: string
     body: JSON.stringify({
       client_name: 'meenow',
       redirect_uris: currentRedirectUri(),
-      scopes: 'read write',
+      scopes: OAUTH_SCOPES,
       website: currentRedirectUri(),
     }),
   });
   if (!res.ok) throw new Error(`App registration failed (${res.status}). Check the instance name.`);
 
   const data = await res.json() as { client_id: string; client_secret: string };
-  const creds = { clientId: data.client_id, clientSecret: data.client_secret };
+  const creds = { clientId: data.client_id, clientSecret: data.client_secret, scopes: OAUTH_SCOPES };
   localStorage.setItem(key(instance, 'creds'), JSON.stringify(creds));
-  return creds;
+  return { clientId: creds.clientId, clientSecret: creds.clientSecret };
 }
 
 export async function startOAuthFlow(instance: string): Promise<void> {
@@ -64,7 +75,7 @@ export async function startOAuthFlow(instance: string): Promise<void> {
     client_id: creds.clientId,
     redirect_uri: currentRedirectUri(),
     response_type: 'code',
-    scope: 'read write',
+    scope: OAUTH_SCOPES,
     code_challenge: challenge,
     code_challenge_method: 'S256',
   });
@@ -95,6 +106,7 @@ export async function handleOAuthCallback(code: string): Promise<void> {
   const { access_token } = await tokenRes.json() as { access_token: string };
   localStorage.removeItem(`${PREFIX}verifier`);
   localStorage.setItem(key(instance, 'token'), access_token);
+  localStorage.setItem(key(instance, 'token-scopes'), OAUTH_SCOPES);
   localStorage.setItem(`${PREFIX}instance`, instance);
 
   const meRes = await fetch(`https://${instance}/api/v1/accounts/verify_credentials`, {
@@ -103,6 +115,19 @@ export async function handleOAuthCallback(code: string): Promise<void> {
   if (!meRes.ok) throw new Error('Could not verify credentials');
   const { id } = await meRes.json() as { id: string };
   localStorage.setItem(key(instance, 'accountId'), id);
+}
+
+// A token minted before `follow` was added to OAUTH_SCOPES cannot perform
+// relationship writes (Pixelfed 403s), and OAuth scopes can't be widened in
+// place. Drop such a token so the app falls back to the login screen and the
+// user re-authenticates once with the current scopes. Returns true if it did.
+export function dropTokenIfScopesStale(): boolean {
+  const instance = localStorage.getItem(`${PREFIX}instance`);
+  if (!instance || !localStorage.getItem(key(instance, 'token'))) return false;
+  if (localStorage.getItem(key(instance, 'token-scopes')) === OAUTH_SCOPES) return false;
+  localStorage.removeItem(key(instance, 'token'));
+  localStorage.removeItem(key(instance, 'token-scopes'));
+  return true;
 }
 
 export function getAuthState(): AuthState | null {
@@ -122,6 +147,7 @@ export function clearAuth(): void {
   const instance = localStorage.getItem(`${PREFIX}instance`);
   if (instance) {
     localStorage.removeItem(key(instance, 'token'));
+    localStorage.removeItem(key(instance, 'token-scopes'));
     localStorage.removeItem(key(instance, 'accountId'));
     localStorage.removeItem(key(instance, 'creds'));
     clearLockedApplied(instance);
