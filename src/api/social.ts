@@ -159,14 +159,15 @@ export async function fetchFollowRequests(auth: AuthState): Promise<Connection[]
   return (await res.json() as ApiAccount[]).map(toConnection);
 }
 
-// :id is the requester's account id; returns the resulting relationship.
-export async function authorizeFollowRequest(auth: AuthState, accountId: string): Promise<Relationship> {
+// :id is the requester's account id. The resulting relationship comes from the
+// back-follow call in acceptAndBackFollow, not from parsing this response body —
+// Pixelfed is inconsistent about what (if anything) this endpoint returns.
+export async function authorizeFollowRequest(auth: AuthState, accountId: string): Promise<void> {
   const res = await fetch(`https://${auth.instance}/api/v1/follow_requests/${accountId}/authorize`, {
     method: 'POST',
     headers: authHeaders(auth),
   });
   if (!res.ok) throw new Error(`Authorize failed (${res.status})`);
-  return toRelationship(await res.json() as ApiRelationship);
 }
 
 export async function rejectFollowRequest(auth: AuthState, accountId: string): Promise<void> {
