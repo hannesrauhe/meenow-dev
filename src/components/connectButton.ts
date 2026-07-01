@@ -56,7 +56,10 @@ export function makeConnectButton(
       apply();
       if (state) onChange?.(state);
     } catch {
+      // Reverting straight back to "Connect" is indistinguishable from the tap
+      // having done nothing — show that it was tried and failed instead.
       apply();
+      btn.textContent = 'Try again';
     }
   };
 
