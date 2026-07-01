@@ -2,7 +2,7 @@
 declare const __GIT_HASH__: string;
 
 import './style.css';
-import { getAuthState, handleOAuthCallback } from './api/auth';
+import { getAuthState, handleOAuthCallback, dropTokenIfScopesStale } from './api/auth';
 import { getLastTriggerTime, type AppState } from './timer';
 import { MAX_POSTS_PER_TRIGGER, getPendingAdd, setPendingAdd, clearPendingAdd } from './state';
 import { fetchTodayPostCount, deletePost, removePostFromCache } from './api/pixelfed';
@@ -371,6 +371,11 @@ async function init(): Promise<void> {
   // Persist an invite handle so it survives the OAuth redirect (redirect_uri has
   // no query string); it is consumed below once authenticated.
   if (add) setPendingAdd(add);
+
+  // One-time migration: tokens minted before the `follow` scope was requested
+  // can't perform relationship writes, so drop them and let the login screen
+  // prompt a single re-authentication with the current scopes.
+  dropTokenIfScopesStale();
 
   // Re-subscribe if the VAPID key was rotated or if the subscription was created
   // in a browser tab and needs to be re-created in the installed PWA context.
