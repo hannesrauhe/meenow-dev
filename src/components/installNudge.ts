@@ -9,6 +9,15 @@ window.addEventListener('beforeinstallprompt', (e) => {
   deferredPrompt = e as BeforeInstallPromptEvent;
 });
 
+// True once the browser has offered a native install prompt (Android/desktop Chrome).
+export function canPromptInstall(): boolean {
+  return deferredPrompt !== null;
+}
+
+export async function promptInstall(): Promise<void> {
+  if (deferredPrompt) await deferredPrompt.prompt();
+}
+
 export function removeInstallNudge(): void {
   document.getElementById('install-nudge')?.remove();
 }
@@ -20,7 +29,7 @@ export function renderInstallNudge(): boolean {
   if (existing) return true;
 
   const ios = isIOS();
-  const canPrompt = !ios && deferredPrompt !== null;
+  const canPrompt = !ios && canPromptInstall();
 
   let instructions: string;
   if (ios) {
@@ -53,8 +62,8 @@ export function renderInstallNudge(): boolean {
   document.body.appendChild(banner);
 
   banner.querySelector('#btn-install')?.addEventListener('click', async () => {
-    if (deferredPrompt) {
-      await deferredPrompt.prompt();
+    if (canPromptInstall()) {
+      await promptInstall();
       banner.remove();
     }
   });

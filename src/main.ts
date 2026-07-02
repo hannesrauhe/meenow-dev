@@ -324,9 +324,10 @@ function mountConnectLanding(handle: string): void {
 function mount(screen: AppState | 'login'): void {
   app.innerHTML = '';
   if (screen === 'login') {
+    // No bottom install banner here — the login wizard has a dedicated install step.
     removeNotificationNudge();
+    removeInstallNudge();
     app.appendChild(renderLogin());
-    renderInstallNudge();
   } else {
     app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid, mountCircle));
     // Show only one bottom banner — both are fixed bottom-0 and would overlap.
@@ -353,6 +354,23 @@ function tick(): void {
     activeScreen = screen;
     mount(screen);
   }
+}
+
+// Trap the hardware/gesture back button on the resting feed/login screen. The
+// overlay mounters each push a history entry and pop it on back; the resting
+// screen has none, so without this a back gesture navigates out of the SPA
+// entirely (on iOS, into a blank Safari tab with no way back). We seed one
+// baseline entry and re-seed it whenever a back lands on a base screen,
+// absorbing the gesture so the user stays in the app. When an overlay is active
+// it registers its own popstate handler (fired after this one) and owns the
+// event, so we defer by re-seeding only for base screens.
+function installBackTrap(): void {
+  history.pushState({ screen: 'base' }, '');
+  window.addEventListener('popstate', () => {
+    if (BASE_SCREENS.has(activeScreen as Screen)) {
+      history.pushState({ screen: 'base' }, '');
+    }
+  });
 }
 
 async function init(): Promise<void> {
@@ -408,6 +426,7 @@ async function init(): Promise<void> {
     }
   }
 
+  installBackTrap();
   tick();
   tickId = window.setInterval(tick, 1000);
 
