@@ -20,7 +20,7 @@ import { renderInstallNudge, removeInstallNudge } from './components/installNudg
 import { renderNotificationNudge, removeNotificationNudge } from './components/notificationNudge';
 import { registerSW } from 'virtual:pwa-register';
 import { idbSet, IDB_KEYS } from './idb';
-import { resubscribeIfNeeded } from './notifications';
+import { resubscribeIfNeeded, clearAppBadge } from './notifications';
 
 const app = document.getElementById('app')!;
 type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'grid' | 'circle' | 'peer' | 'connect';
@@ -164,6 +164,7 @@ function onPosted(): void {
     void idbSet(IDB_KEYS.postedTriggerMs, getLastTriggerTime().getTime());
   }
   periodPostCount = Math.min(periodPostCount + 1, MAX_POSTS_PER_TRIGGER);
+  clearAppBadge();
 }
 
 function mountCapture(): void {
@@ -398,6 +399,9 @@ async function init(): Promise<void> {
   // Re-subscribe if the VAPID key was rotated or if the subscription was created
   // in a browser tab and needs to be re-created in the installed PWA context.
   void resubscribeIfNeeded();
+
+  // Opening the app answers the daily-reminder badge regardless of posting.
+  clearAppBadge();
 
   // Fetch the authoritative post count for the current trigger period from the
   // server before starting the tick loop. This ensures multi-device state is

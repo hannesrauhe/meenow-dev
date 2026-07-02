@@ -5,12 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <!-- "default" adapts status-bar text to the theme-color metas below;
+       "black-translucent" would force white text (unreadable on the light theme). -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="meenow" />
   <meta name="theme-color" content="#FDFBF7" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#1C1A17" media="(prefers-color-scheme: dark)" />
   <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="/icon.svg" />
+  <!-- iOS does not accept SVG here; needs an opaque square PNG (iOS masks corners itself). -->
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <title>meenow</title>
 </head>
 <body>
