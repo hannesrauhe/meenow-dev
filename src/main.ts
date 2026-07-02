@@ -323,9 +323,10 @@ function mountConnectLanding(handle: string): void {
 function mount(screen: AppState | 'login'): void {
   app.innerHTML = '';
   if (screen === 'login') {
+    // No bottom install banner here — the login wizard has a dedicated install step.
     removeNotificationNudge();
+    removeInstallNudge();
     app.appendChild(renderLogin());
-    renderInstallNudge();
   } else {
     app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid, mountCircle));
     // Show only one bottom banner — both are fixed bottom-0 and would overlap.
