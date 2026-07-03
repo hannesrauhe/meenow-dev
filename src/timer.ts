@@ -27,7 +27,10 @@ function getTriggerForDate(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), WINDOW_START_HOUR, offsetMinutes, 0, 0);
 }
 
-function getTodayTrigger(): Date {
+// Today's trigger regardless of whether it has fired yet — before it fires the
+// device is still in the tail of the previous trigger period (the SW uses this
+// to keep pre-trigger ticks silent).
+export function getTodayTrigger(): Date {
   return getTriggerForDate(new Date());
 }
 

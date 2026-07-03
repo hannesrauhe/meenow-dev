@@ -6,7 +6,7 @@ import {
   createHandlerBoundToURL,
 } from 'workbox-precaching';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
-import { getLastTriggerTime } from './timer';
+import { getLastTriggerTime, getTodayTrigger } from './timer';
 import { idbGet, idbSet, IDB_KEYS, type StoredAuth } from './idb';
 import { fetchNewEngagement, fetchFriendsPostedCount } from './api/engagement';
 
@@ -118,16 +118,38 @@ async function showPostPostedDigest(triggerMs: number, late: boolean): Promise<v
   return showFallback();
 }
 
+// iOS/WebKit revokes the push subscription after three push events without a
+// visible notification; showing one resets its strike count. Mirror that budget:
+// pre-trigger ticks may stay silent up to twice in a row, the third must show.
+const MAX_SILENT_PUSHES = 2;
+
+function resetSilentCount(): Promise<void> {
+  return idbSet(IDB_KEYS.silentPushCount, 0).catch(() => {});
+}
+
 async function handleTick(late: boolean): Promise<void> {
   const triggerMs = getLastTriggerTime().getTime();
+
+  // Tick before today's trigger (clock skew, or a stale timezone gating the
+  // server's send) means the device is still in the previous period's tail — a
+  // notification now would be mistimed, so stay silent while the counted silent
+  // budget allows it. If IndexedDB fails we cannot count, so fail visible.
+  if (Date.now() < getTodayTrigger().getTime()) {
+    try {
+      const silent = (await idbGet<number>(IDB_KEYS.silentPushCount)) ?? 0;
+      if (silent < MAX_SILENT_PUSHES) {
+        await idbSet(IDB_KEYS.silentPushCount, silent + 1);
+        return;
+      }
+    } catch { /* fall through to a visible notification */ }
+  }
+
   // idbGet reads the timestamp written by the app after a successful post.
   const notPosted = await idbGet<number>(IDB_KEYS.postedTriggerMs)
     .then(posted => (posted ?? 0) < triggerMs)
     .catch(() => true);
-  // The server gates ticks to the post-trigger window per stored timezone, so a
-  // pre-trigger arrival here (clock skew, stale timezone) is rare — showing the
-  // reminder slightly early beats a silent push that burns the iOS budget.
-  return notPosted ? showDaily() : showPostPostedDigest(triggerMs, late);
+  await (notPosted ? showDaily() : showPostPostedDigest(triggerMs, late));
+  await resetSilentCount();
 }
 
 self.addEventListener('push', event => {
@@ -139,14 +161,19 @@ self.addEventListener('push', event => {
   } catch { /* malformed payload */ }
 
   if (data.force) {
-    event.waitUntil(showDaily().catch(err => console.error('[sw] push handler failed', err)));
+    event.waitUntil(
+      showDaily()
+        .then(resetSilentCount)
+        .catch(err => console.error('[sw] push handler failed', err))
+    );
     return;
   }
 
-  // Every non-force tick must end in a visible notification (never-silent rule).
+  // Post-trigger ticks must end in a visible notification; pre-trigger ticks may
+  // consume the counted silent budget above instead.
   event.waitUntil(
     handleTick(data.late === true)
-      .catch(() => showFallback())
+      .catch(() => showFallback().then(resetSilentCount))
       .catch(err => console.error('[sw] push handler failed', err))
   );
 });
