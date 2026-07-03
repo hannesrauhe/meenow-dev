@@ -14,13 +14,18 @@ declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ revision: string | null; url: string }>;
 };
 
-precacheAndRoute(self.__WB_MANIFEST);
+const manifest = self.__WB_MANIFEST;
+precacheAndRoute(manifest);
 cleanupOutdatedCaches();
 
 // Serve the freshly precached index.html for all navigations so a reload after
 // the new SW takes control loads the new hashed bundle, bypassing the GitHub
 // Pages / browser HTML cache. Precache key is "index.html" (no leading slash).
-registerRoute(new NavigationRoute(createHandlerBoundToURL('index.html')));
+// Guarded: in dev mode the manifest is empty and createHandlerBoundToURL would
+// throw at evaluation time, aborting SW registration on the Vite dev server.
+if (manifest.length) {
+  registerRoute(new NavigationRoute(createHandlerBoundToURL('index.html')));
+}
 
 // Take control of open clients on activate so skipWaiting() reloads the page
 // (controllerchange fires) — otherwise the update banner's Refresh does nothing.
