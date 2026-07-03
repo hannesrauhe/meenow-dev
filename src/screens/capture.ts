@@ -1,5 +1,5 @@
 // Capture screen: dual-camera photo capture flow (back camera then selfie), composite stitching, preview with optional caption/location, and post submission.
-import { MAX_POSTS_PER_TRIGGER } from '../state';
+import { MAX_POSTS_PER_TRIGGER, isIOS, isPwaInstalled } from '../state';
 import { getAuthState } from '../api/auth';
 import { postMeenow } from '../api/pixelfed';
 import { CAT_EARS_SHUTTER } from '../icons';
@@ -158,9 +158,13 @@ async function stitchPhotos(back: Blob, front: Blob): Promise<Blob> {
 function cameraErrorMessage(err: unknown): string {
   if (err instanceof DOMException) {
     if (err.name === 'NotAllowedError') {
-      return /iphone|ipad|ipod/i.test(navigator.userAgent)
-        ? 'Camera access denied. Go to Settings → Safari → Camera.'
-        : 'Camera access denied. Go to Settings → Apps → [Browser] → Permissions → Camera.';
+      // Installed iOS web apps get their own Settings entry (iOS 16.4+).
+      if (isIOS()) {
+        return isPwaInstalled()
+          ? 'Camera access denied. Go to Settings → meenow → Camera.'
+          : 'Camera access denied. Go to Settings → Safari → Camera.';
+      }
+      return 'Camera access denied. Go to Settings → Apps → [Browser] → Permissions → Camera.';
     }
     if (err.name === 'NotFoundError') return 'No camera found on this device.';
   }

@@ -20,7 +20,7 @@ import { renderInstallNudge, removeInstallNudge } from './components/installNudg
 import { renderNotificationNudge, removeNotificationNudge } from './components/notificationNudge';
 import { registerSW } from 'virtual:pwa-register';
 import { idbSet, IDB_KEYS } from './idb';
-import { resubscribeIfNeeded } from './notifications';
+import { resubscribeIfNeeded, clearAppBadge } from './notifications';
 
 const app = document.getElementById('app')!;
 type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'grid' | 'circle' | 'peer' | 'connect';
@@ -164,6 +164,7 @@ function onPosted(): void {
     void idbSet(IDB_KEYS.postedTriggerMs, getLastTriggerTime().getTime());
   }
   periodPostCount = Math.min(periodPostCount + 1, MAX_POSTS_PER_TRIGGER);
+  clearAppBadge();
 }
 
 function mountCapture(): void {
@@ -323,9 +324,10 @@ function mountConnectLanding(handle: string): void {
 function mount(screen: AppState | 'login'): void {
   app.innerHTML = '';
   if (screen === 'login') {
+    // No bottom install banner here — the login wizard has a dedicated install step.
     removeNotificationNudge();
+    removeInstallNudge();
     app.appendChild(renderLogin());
-    renderInstallNudge();
   } else {
     app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid, mountCircle));
     // Show only one bottom banner — both are fixed bottom-0 and would overlap.
@@ -352,6 +354,23 @@ function tick(): void {
     activeScreen = screen;
     mount(screen);
   }
+}
+
+// Trap the hardware/gesture back button on the resting feed/login screen. The
+// overlay mounters each push a history entry and pop it on back; the resting
+// screen has none, so without this a back gesture navigates out of the SPA
+// entirely (on iOS, into a blank Safari tab with no way back). We seed one
+// baseline entry and re-seed it whenever a back lands on a base screen,
+// absorbing the gesture so the user stays in the app. When an overlay is active
+// it registers its own popstate handler (fired after this one) and owns the
+// event, so we defer by re-seeding only for base screens.
+function installBackTrap(): void {
+  history.pushState({ screen: 'base' }, '');
+  window.addEventListener('popstate', () => {
+    if (BASE_SCREENS.has(activeScreen as Screen)) {
+      history.pushState({ screen: 'base' }, '');
+    }
+  });
 }
 
 async function init(): Promise<void> {
@@ -381,6 +400,9 @@ async function init(): Promise<void> {
   // in a browser tab and needs to be re-created in the installed PWA context.
   void resubscribeIfNeeded();
 
+  // Opening the app answers the daily-reminder badge regardless of posting.
+  clearAppBadge();
+
   // Fetch the authoritative post count for the current trigger period from the
   // server before starting the tick loop. This ensures multi-device state is
   // correct from the first render without any localStorage synchronisation logic.
@@ -404,6 +426,7 @@ async function init(): Promise<void> {
     }
   }
 
+  installBackTrap();
   tick();
   tickId = window.setInterval(tick, 1000);
 
