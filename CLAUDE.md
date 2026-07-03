@@ -17,6 +17,8 @@ Push notification env vars (`VITE_VAPID_PUBLIC_KEY`, `VITE_PUSH_RELAY_TOKEN`, `V
 
 Icon PNG variants (`public/apple-touch-icon.png` — square opaque background, iOS rejects SVG here; `public/icon-maskable-512.png` — artwork inset to 80% for Android adaptive-icon masks) are generated from `public/icon.svg` via `node scripts/gen-icons.mjs` (needs `npm i --no-save playwright-core`; uses the preinstalled Chromium). Re-run after changing the icon.
 
+The social-share preview card (`public/og-image.png`, 1200×630, referenced by the `og:image`/`twitter:image` tags in `index.html`) is generated the same way via `node scripts/gen-og-image.mjs`. Re-run after changing the icon or the tagline. The Open Graph / Twitter meta tags use absolute production URLs (`https://meenow.de/…`) so scrapers resolve the image even when the same `index.html` is served from `dev.meenow.de`; the dev mirror injects a `noindex` robots meta at runtime (`src/main.ts`) so only production is indexed.
+
 ## Code style
 
 - Keep inline comments minimal. Only comment non-obvious intent or rationale (e.g. why a workaround exists); do not narrate what the code already states. Prefer a single concise line over multi-line explanations.

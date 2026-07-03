@@ -43,6 +43,11 @@ if (DEV_HOSTNAMES.has(window.location.hostname)) {
   badge.textContent = `dev ${__GIT_HASH__}`;
   badge.className = 'fixed bottom-3 right-3 bg-gold text-white text-xs font-semibold px-2 py-0.5 rounded-full z-50 opacity-75 pointer-events-none select-none';
   document.body.appendChild(badge);
+  // Keep the dev mirror out of search results (the index.html/robots.txt is shared with prod).
+  const noindex = document.createElement('meta');
+  noindex.name = 'robots';
+  noindex.content = 'noindex, nofollow';
+  document.head.appendChild(noindex);
 }
 
 function showUpdateBanner(updateSW: (reloadPage?: boolean) => Promise<void>): void {
