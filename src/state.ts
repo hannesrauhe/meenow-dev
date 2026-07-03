@@ -47,6 +47,17 @@ export function setStoredVapidKey(key: string): void {
   localStorage.setItem('meenow:vapid-key', key);
 }
 
+// IANA timezone last successfully written into the relay subscription file.
+// A mismatch with the device timezone on app load (travel, or a legacy file
+// written before the tz field existed) triggers syncSubscriptionTz().
+export function getSyncedTz(): string | null {
+  return localStorage.getItem('meenow:tz');
+}
+
+export function setSyncedTz(tz: string): void {
+  localStorage.setItem('meenow:tz', tz);
+}
+
 // Records that the account has been ensured "locked" (manually approve followers)
 // for an instance, so the Circle screen doesn't re-PATCH on every open. Cleared on
 // logout so a fresh login re-applies. Instance-scoped because creds are per-instance.

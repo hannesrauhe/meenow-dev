@@ -6,6 +6,8 @@
     "types": ["vite/client", "vite-plugin-pwa/client"],
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
+    "allowJs": true,
+    "checkJs": true,
     "isolatedModules": true,
     "noEmit": true,
     "strict": true,

@@ -54,12 +54,25 @@ function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-// Build a digest, or surface friends' activity, on a tick that would otherwise be
-// silent because the user already posted. A real notification here replaces
-// Chrome's generic "site updated" notification and keeps the push budget healthy.
-async function showPostPostedDigest(triggerMs: number, now: number): Promise<void> {
+// Minimal always-visible fallback for ticks with nothing better to say. Reuses
+// the digest tag so repeated post-posting ticks replace instead of stacking; a
+// replaced notification still counts as user-visible for the push budget. No
+// app badge: the user already posted, so nothing is pending.
+function showFallback(): Promise<void> {
+  return self.registration.showNotification('meenow', {
+    body: "You're done for today — see what friends shared",
+    icon: ICON,
+    badge: BADGE,
+    tag: 'meenow-digest',
+  });
+}
+
+// Build a digest, or surface friends' activity, on a tick after the user already
+// posted. Must always end in a visible notification: iOS revokes the push
+// subscription after three silent pushes, and Chrome drains the push budget.
+async function showPostPostedDigest(triggerMs: number, late: boolean): Promise<void> {
   const auth = await idbGet<StoredAuth>(IDB_KEYS.auth);
-  if (!auth) return;
+  if (!auth) return showFallback();
 
   const lastSeenId = await idbGet<string>(IDB_KEYS.lastSeenNotifId);
   const digestShown = (await idbGet<number>(IDB_KEYS.digestShownTriggerMs)) ?? 0;
@@ -81,10 +94,9 @@ async function showPostPostedDigest(triggerMs: number, now: number): Promise<voi
     return;
   }
 
-  // Budget-safety fallback: once per period, on a late tick (final hour of the
-  // daytime cron window, >= 19:00 UTC), surface how many friends posted.
-  const lateTick = new Date(now).getUTCHours() >= 19;
-  if (digestShown < triggerMs && lateTick) {
+  // Once per period, on the server-flagged late-evening tick, surface how many
+  // friends posted (the flag is timezone-correct by construction server-side).
+  if (late && digestShown < triggerMs) {
     const friends = await fetchFriendsPostedCount(auth);
     if (friends > 0) {
       await self.registration.showNotification('meenow', {
@@ -94,30 +106,42 @@ async function showPostPostedDigest(triggerMs: number, now: number): Promise<voi
         tag: 'meenow-friends',
       });
       await idbSet(IDB_KEYS.digestShownTriggerMs, triggerMs);
+      return;
     }
   }
+
+  return showFallback();
+}
+
+async function handleTick(late: boolean): Promise<void> {
+  const triggerMs = getLastTriggerTime().getTime();
+  // idbGet reads the timestamp written by the app after a successful post.
+  const notPosted = await idbGet<number>(IDB_KEYS.postedTriggerMs)
+    .then(posted => (posted ?? 0) < triggerMs)
+    .catch(() => true);
+  // The server gates ticks to the post-trigger window per stored timezone, so a
+  // pre-trigger arrival here (clock skew, stale timezone) is rare — showing the
+  // reminder slightly early beats a silent push that burns the iOS budget.
+  return notPosted ? showDaily() : showPostPostedDigest(triggerMs, late);
 }
 
 self.addEventListener('push', event => {
-  const data: { ts?: number; force?: boolean } = event.data?.json() ?? {};
-  const now = Date.now();
-  const triggerMs = getLastTriggerTime().getTime();
-
-  // Skip ticks that arrive before the trigger (clock skew / early delivery).
-  if (now < triggerMs && !data.force) return;
+  // json() throws on malformed payloads — swallow and treat as a plain tick so
+  // even a corrupt push cannot end silently.
+  let data: { ts?: number; force?: boolean; late?: boolean } = {};
+  try {
+    data = event.data?.json() ?? {};
+  } catch { /* malformed payload */ }
 
   if (data.force) {
     event.waitUntil(showDaily().catch(err => console.error('[sw] push handler failed', err)));
     return;
   }
 
-  // Notify on every tick unless the user has already posted in this period.
-  // idbGet reads the timestamp written by the app after a successful post.
+  // Every non-force tick must end in a visible notification (never-silent rule).
   event.waitUntil(
-    idbGet<number>(IDB_KEYS.postedTriggerMs)
-      .then(posted => (posted ?? 0) < triggerMs)
-      .catch(() => true)
-      .then(notPosted => (notPosted ? showDaily() : showPostPostedDigest(triggerMs, now)))
+    handleTick(data.late === true)
+      .catch(() => showFallback())
       .catch(err => console.error('[sw] push handler failed', err))
   );
 });
