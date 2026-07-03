@@ -8,6 +8,7 @@ export const IDB_KEYS = {
   auth: 'auth',
   lastSeenNotifId: 'last-seen-notif-id',
   digestShownTriggerMs: 'digest-shown-trigger-ms',
+  silentPushCount: 'silent-push-count',
 } as const;
 
 export interface StoredAuth {

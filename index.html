@@ -14,7 +14,27 @@
   <link rel="icon" href="/icon.svg" type="image/svg+xml" />
   <!-- iOS does not accept SVG here; needs an opaque square PNG (iOS masks corners itself). -->
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-  <title>meenow</title>
+  <title>meenow — one spontaneous photo a day, shared with friends</title>
+  <meta name="description" content="meenow prompts you once a day, at a random moment, to snap a dual-camera photo and share it with a small circle of friends. No feeds to scroll, no likes to chase — just a daily glimpse of each other." />
+
+  <!-- Social share previews (messengers, Slack, Discord, Facebook, LinkedIn).
+       Absolute URLs point at the production domain so scrapers resolve the image
+       even when the same file is served from dev.meenow.de. -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="meenow" />
+  <meta property="og:title" content="meenow — one spontaneous photo a day, shared with friends" />
+  <meta property="og:description" content="A once-a-day prompt to snap a dual-camera photo and share it with a small circle of friends. No endless feed, no likes — just a daily glimpse of each other." />
+  <meta property="og:url" content="https://meenow.de/" />
+  <meta property="og:image" content="https://meenow.de/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="meenow — one spontaneous photo a day, shared with friends" />
+  <meta property="og:locale" content="en_US" />
+
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="meenow — one spontaneous photo a day, shared with friends" />
+  <meta name="twitter:description" content="A once-a-day prompt to snap a dual-camera photo and share it with a small circle of friends. No endless feed, no likes — just a daily glimpse of each other." />
+  <meta name="twitter:image" content="https://meenow.de/og-image.png" />
 </head>
 <body>
   <div id="app" class="max-w-[480px] mx-auto"></div>

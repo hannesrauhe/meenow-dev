@@ -20,7 +20,7 @@ import { renderInstallNudge, removeInstallNudge } from './components/installNudg
 import { renderNotificationNudge, removeNotificationNudge } from './components/notificationNudge';
 import { registerSW } from 'virtual:pwa-register';
 import { idbSet, IDB_KEYS } from './idb';
-import { resubscribeIfNeeded, clearAppBadge } from './notifications';
+import { resubscribeIfNeeded, syncSubscriptionTz, clearAppBadge } from './notifications';
 
 const app = document.getElementById('app')!;
 type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'grid' | 'circle' | 'peer' | 'connect';
@@ -43,6 +43,11 @@ if (DEV_HOSTNAMES.has(window.location.hostname)) {
   badge.textContent = `dev ${__GIT_HASH__}`;
   badge.className = 'fixed bottom-3 right-3 bg-gold text-white text-xs font-semibold px-2 py-0.5 rounded-full z-50 opacity-75 pointer-events-none select-none';
   document.body.appendChild(badge);
+  // Keep the dev mirror out of search results (the index.html/robots.txt is shared with prod).
+  const noindex = document.createElement('meta');
+  noindex.name = 'robots';
+  noindex.content = 'noindex, nofollow';
+  document.head.appendChild(noindex);
 }
 
 function showUpdateBanner(updateSW: (reloadPage?: boolean) => Promise<void>): void {
@@ -398,7 +403,9 @@ async function init(): Promise<void> {
 
   // Re-subscribe if the VAPID key was rotated or if the subscription was created
   // in a browser tab and needs to be re-created in the installed PWA context.
-  void resubscribeIfNeeded();
+  // The tz sync runs after: a fresh re-subscribe already writes the timezone,
+  // and running both concurrently would race on the subscription filename.
+  void resubscribeIfNeeded().then(() => syncSubscriptionTz());
 
   // Opening the app answers the daily-reminder badge regardless of posting.
   clearAppBadge();

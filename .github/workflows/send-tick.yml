@@ -1,8 +1,12 @@
 name: Send notification tick
 
+# Runs all day: the script gates each subscription to its own local-time trigger
+# window (see the tz field in subscription files), so most runs send nothing.
+# Skipping the checkout when idle is not possible — the gate depends on per-file
+# timezones stored in the subscriptions repo.
 on:
   schedule:
-    - cron: '*/30 7-19 * * *'
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -32,6 +36,7 @@ jobs:
           VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
           VAPID_SUBJECT: mailto:2qhhabkrd@mozmail.com
           SUBS_DIR: push-subs/${{ secrets.VITE_PUSH_SUBS_PATH }}
+          DEFAULT_TZ: Europe/Berlin
         run: node scripts/send-tick.mjs
 
       - name: Commit expired subscription removals
