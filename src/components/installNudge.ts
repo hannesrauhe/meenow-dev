@@ -1,5 +1,5 @@
 // Component: PWA install-to-home-screen nudge banner (rendered over the feed and login screens).
-import { isPwaInstalled, isInstallDismissed, dismissInstall } from '../state';
+import { isPwaInstalled, isInstallDismissed, dismissInstall, isIOS } from '../state';
 
 type BeforeInstallPromptEvent = Event & { prompt(): Promise<void> };
 let deferredPrompt: BeforeInstallPromptEvent | null = null;
@@ -8,13 +8,6 @@ window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e as BeforeInstallPromptEvent;
 });
-
-export function isIOS(): boolean {
-  return (
-    /iphone|ipad|ipod/i.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-  );
-}
 
 // True once the browser has offered a native install prompt (Android/desktop Chrome).
 export function canPromptInstall(): boolean {

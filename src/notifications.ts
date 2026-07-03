@@ -23,6 +23,12 @@ export function isPushSupported(): boolean {
   return 'Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window;
 }
 
+// Clears the app-icon badge set by the SW's daily reminder. No-op where unsupported.
+export function clearAppBadge(): void {
+  const nav = navigator as Navigator & { clearAppBadge?: () => Promise<void> };
+  void nav.clearAppBadge?.().catch(() => {});
+}
+
 export async function isNotificationsEnabled(): Promise<boolean> {
   if (!isPushSupported() || Notification.permission !== 'granted') return false;
   const reg = await navigator.serviceWorker.ready;

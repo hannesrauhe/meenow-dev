@@ -16,7 +16,9 @@ export function renderConnectLanding(auth: AuthState, handle: string, onDone: ()
   header.className = 'sticky top-0 z-10 bg-cream/95 backdrop-blur-sm flex items-center gap-3 px-4 pb-3 pt-[calc(env(safe-area-inset-top,0px)+0.75rem)] border-b border-ink/10';
 
   const backBtn = document.createElement('button');
-  backBtn.className = 'flex items-center gap-1 text-sm text-gold font-medium w-8 h-8 -ml-1';
+  // [&>svg]:size-5 gives the chevron an explicit size; without it WebKit collapses
+  // a viewBox-only SVG to 0×0 as a flex item, hiding the back button on iOS.
+  backBtn.className = 'flex items-center gap-1 text-sm text-gold font-medium w-8 h-8 -ml-1 [&>svg]:size-5';
   backBtn.setAttribute('aria-label', 'Done');
   backBtn.innerHTML = CHEVRON_LEFT_ICON;
   backBtn.addEventListener('click', onDone);

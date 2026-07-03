@@ -37,6 +37,12 @@
   * {
     -webkit-tap-highlight-color: transparent;
   }
+
+  /* Suppress the iOS long-press save/share callout on photos — posts are
+     ephemeral (archived after each trigger period), so no one-touch export. */
+  img {
+    -webkit-touch-callout: none;
+  }
 }
 
 @layer components {

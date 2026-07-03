@@ -33,7 +33,15 @@ self.addEventListener('message', (event: ExtendableMessageEvent) => {
 const ICON = '/icon-192.png';
 const BADGE = '/badge-96.png';
 
+// App-icon badge alongside the daily reminder (installed PWAs on Android and
+// iOS 16.4+; cleared by the app on open/post). Fire-and-forget where unsupported.
+function setAppBadge(): void {
+  const nav = self.navigator as WorkerNavigator & { setAppBadge?: (n?: number) => Promise<void> };
+  void nav.setAppBadge?.(1).catch(() => {});
+}
+
 function showDaily(): Promise<void> {
+  setAppBadge();
   return self.registration.showNotification('meenow', {
     body: 'Time for your daily meenow!',
     icon: ICON,

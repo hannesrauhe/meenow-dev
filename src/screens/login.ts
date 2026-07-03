@@ -1,8 +1,8 @@
 // Login screen: a short onboarding wizard that introduces meenow and Pixelfed,
 // recommends installing the PWA, then collects an instance and starts OAuth PKCE.
 import { startOAuthFlow } from '../api/auth';
-import { isPwaInstalled } from '../state';
-import { isIOS, canPromptInstall, promptInstall } from '../components/installNudge';
+import { isPwaInstalled, isIOS } from '../state';
+import { canPromptInstall, promptInstall } from '../components/installNudge';
 
 interface IntroStep {
   title: string;
