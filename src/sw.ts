@@ -52,15 +52,15 @@ function showDaily(): Promise<void> {
     icon: ICON,
     badge: BADGE,
     tag: 'meenow-daily',
-  });
+  }).then(resetSilentCount);
 }
 
 function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-// Minimal always-visible fallback for ticks with nothing better to say. Reuses
-// the digest tag so repeated post-posting ticks replace instead of stacking; a
+// Minimal visible fallback, shown only when the silent budget is exhausted.
+// Reuses the digest tag so repeated fallbacks replace instead of stacking; a
 // replaced notification still counts as user-visible for the push budget. No
 // app badge: the user already posted, so nothing is pending.
 function showFallback(): Promise<void> {
@@ -69,15 +69,15 @@ function showFallback(): Promise<void> {
     icon: ICON,
     badge: BADGE,
     tag: 'meenow-digest',
-  });
+  }).then(resetSilentCount);
 }
 
 // Build a digest, or surface friends' activity, on a tick after the user already
-// posted. Must always end in a visible notification: iOS revokes the push
-// subscription after three silent pushes, and Chrome drains the push budget.
+// posted. Ticks with nothing to report stay silent within the counted budget;
+// once it is exhausted the minimal fallback shows (iOS three-strikes revocation).
 async function showPostPostedDigest(triggerMs: number, late: boolean): Promise<void> {
   const auth = await idbGet<StoredAuth>(IDB_KEYS.auth);
-  if (!auth) return showFallback();
+  if (!auth) return showFallbackOrSilent();
 
   const lastSeenId = await idbGet<string>(IDB_KEYS.lastSeenNotifId);
   const digestShown = (await idbGet<number>(IDB_KEYS.digestShownTriggerMs)) ?? 0;
@@ -96,6 +96,7 @@ async function showPostPostedDigest(triggerMs: number, late: boolean): Promise<v
     });
     if (eng.newestId) await idbSet(IDB_KEYS.lastSeenNotifId, eng.newestId);
     await idbSet(IDB_KEYS.digestShownTriggerMs, triggerMs);
+    await resetSilentCount();
     return;
   }
 
@@ -111,20 +112,40 @@ async function showPostPostedDigest(triggerMs: number, late: boolean): Promise<v
         tag: 'meenow-friends',
       });
       await idbSet(IDB_KEYS.digestShownTriggerMs, triggerMs);
+      await resetSilentCount();
       return;
     }
   }
 
-  return showFallback();
+  return showFallbackOrSilent();
 }
 
 // iOS/WebKit revokes the push subscription after three push events without a
 // visible notification; showing one resets its strike count. Mirror that budget:
-// pre-trigger ticks may stay silent up to twice in a row, the third must show.
+// no-value ticks may stay silent up to twice in a row, the third must show.
 const MAX_SILENT_PUSHES = 2;
 
 function resetSilentCount(): Promise<void> {
   return idbSet(IDB_KEYS.silentPushCount, 0).catch(() => {});
+}
+
+// Consume one unit of the silent budget. Returns false when the budget is
+// exhausted — or when IndexedDB fails, since an uncounted silent push could be
+// the one that gets the subscription revoked — meaning something must be shown.
+async function trySilent(): Promise<boolean> {
+  try {
+    const silent = (await idbGet<number>(IDB_KEYS.silentPushCount)) ?? 0;
+    if (silent < MAX_SILENT_PUSHES) {
+      await idbSet(IDB_KEYS.silentPushCount, silent + 1);
+      return true;
+    }
+  } catch { /* cannot count — fail visible */ }
+  return false;
+}
+
+// A tick with nothing of value to report stays silent while the budget allows.
+function showFallbackOrSilent(): Promise<void> {
+  return trySilent().then(silent => (silent ? undefined : showFallback()));
 }
 
 async function handleTick(late: boolean): Promise<void> {
@@ -132,24 +153,14 @@ async function handleTick(late: boolean): Promise<void> {
 
   // Tick before today's trigger (clock skew, or a stale timezone gating the
   // server's send) means the device is still in the previous period's tail — a
-  // notification now would be mistimed, so stay silent while the counted silent
-  // budget allows it. If IndexedDB fails we cannot count, so fail visible.
-  if (Date.now() < getTodayTrigger().getTime()) {
-    try {
-      const silent = (await idbGet<number>(IDB_KEYS.silentPushCount)) ?? 0;
-      if (silent < MAX_SILENT_PUSHES) {
-        await idbSet(IDB_KEYS.silentPushCount, silent + 1);
-        return;
-      }
-    } catch { /* fall through to a visible notification */ }
-  }
+  // notification now would be mistimed, so stay silent while the budget allows.
+  if (Date.now() < getTodayTrigger().getTime() && (await trySilent())) return;
 
   // idbGet reads the timestamp written by the app after a successful post.
   const notPosted = await idbGet<number>(IDB_KEYS.postedTriggerMs)
     .then(posted => (posted ?? 0) < triggerMs)
     .catch(() => true);
   await (notPosted ? showDaily() : showPostPostedDigest(triggerMs, late));
-  await resetSilentCount();
 }
 
 self.addEventListener('push', event => {
@@ -161,19 +172,16 @@ self.addEventListener('push', event => {
   } catch { /* malformed payload */ }
 
   if (data.force) {
-    event.waitUntil(
-      showDaily()
-        .then(resetSilentCount)
-        .catch(err => console.error('[sw] push handler failed', err))
-    );
+    event.waitUntil(showDaily().catch(err => console.error('[sw] push handler failed', err)));
     return;
   }
 
-  // Post-trigger ticks must end in a visible notification; pre-trigger ticks may
-  // consume the counted silent budget above instead.
+  // Ticks with value always show; no-value ticks (pre-trigger, or post-posting
+  // with nothing to report — including errors) consume the counted silent budget
+  // and only surface the fallback once it is exhausted.
   event.waitUntil(
     handleTick(data.late === true)
-      .catch(() => showFallback().then(resetSilentCount))
+      .catch(() => showFallbackOrSilent())
       .catch(err => console.error('[sw] push handler failed', err))
   );
 });
