@@ -39,11 +39,14 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
     }, 1000);
   }
 
-  el.appendChild(header);
+  // Wrapper around header + content + footer so pull-to-refresh can translate
+  // the whole feed while the fixed spinner (appended to `el`) rides above it.
+  const body = document.createElement('div');
+  body.appendChild(header);
 
   const content = document.createElement('div');
   content.id = 'feed-content';
-  el.appendChild(content);
+  body.appendChild(content);
 
   const footer = document.createElement('footer');
   footer.className = 'py-6 text-center text-xs text-ink/25 space-y-2';
@@ -69,14 +72,15 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
   logoutBtn.addEventListener('click', () => { clearAuth(); window.location.reload(); });
   footer.appendChild(logoutBtn);
 
-  el.appendChild(footer);
+  body.appendChild(footer);
+  el.appendChild(body);
 
   header.querySelector('#btn-post-again')?.addEventListener('click', onRequestCapture);
   header.querySelector('#btn-open-grid')?.addEventListener('click', onOpenGrid);
   header.querySelector('#btn-open-circle')?.addEventListener('click', onOpenCircle);
 
   if (auth) {
-    setupRefresh(el, content, auth, postCount, onOpenPost);
+    setupRefresh(el, body, content, auth, postCount, onOpenPost);
     loadFeed(content, auth, postCount, onOpenPost);
     // Mark the circle icon when follow requests are waiting.
     void fetchPendingRequestCount(auth).then(count => {
@@ -94,7 +98,7 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
 // Pull-to-refresh + foreground refresh. iOS standalone PWAs have no native
 // pull-to-refresh, and Android's is disabled via overscroll-behavior (style.css),
 // so this custom gesture is the single source of truth on both platforms.
-function setupRefresh(el: HTMLElement, content: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void): void {
+function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void): void {
   const PULL_THRESHOLD = 70; // px of (damped) pull needed to trigger a refresh
   const PULL_MAX = 110;
   let refreshing = false;
@@ -110,12 +114,17 @@ function setupRefresh(el: HTMLElement, content: HTMLElement, auth: AuthState, po
     const p = Math.min(1, d / PULL_THRESHOLD);
     indicator.style.opacity = String(p);
     indicator.style.transform = `translateX(-50%) translateY(${d}px) scale(${0.6 + 0.4 * p})`;
+    body.style.transform = `translateY(${d}px)`;
   };
   const resetPull = (): void => {
     indicator.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
     indicator.style.opacity = '0';
     indicator.style.transform = 'translateX(-50%) translateY(0) scale(0.6)';
-    setTimeout(() => { indicator.style.transition = ''; }, 220);
+    body.style.transition = 'transform 0.2s ease';
+    body.style.transform = 'translateY(0)';
+    // Clear the transform at rest so it never establishes a containing block that
+    // would break the sticky header / backdrop-blur once the animation finishes.
+    setTimeout(() => { indicator.style.transition = ''; body.style.transition = ''; body.style.transform = ''; }, 220);
   };
 
   const refresh = async (): Promise<void> => {
@@ -124,6 +133,9 @@ function setupRefresh(el: HTMLElement, content: HTMLElement, auth: AuthState, po
     indicator.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
     indicator.style.opacity = '1';
     indicator.style.transform = `translateX(-50%) translateY(${Math.round(PULL_THRESHOLD * 0.6)}px) scale(1)`;
+    // Snap the feed back while the spinner stays pinned during the load.
+    body.style.transition = 'transform 0.2s ease';
+    body.style.transform = 'translateY(0)';
     try {
       await loadFeed(content, auth, postCount, onOpenPost, true);
     } finally {
@@ -149,6 +161,7 @@ function setupRefresh(el: HTMLElement, content: HTMLElement, auth: AuthState, po
     // scrolling is never blocked. Requires a non-passive listener.
     e.preventDefault();
     indicator.style.transition = '';
+    body.style.transition = '';
     dist = Math.min(PULL_MAX, dy * 0.5);
     setPull(dist);
   }, { passive: false });
@@ -302,6 +315,12 @@ function makePostCard(post: FeedPost, unblurred: boolean, onOpenPost: (post: Fee
     const countEl = document.createElement('span');
     countEl.textContent = `${post.replyCount}`;
     cardFooter.appendChild(countEl);
+    // Open the detail (with replies) on tap, gated like the photo so a blurred
+    // feed stays unreachable until the user posts.
+    if (unblurred) {
+      cardFooter.classList.add('cursor-pointer');
+      cardFooter.addEventListener('click', () => onOpenPost(post));
+    }
     card.appendChild(cardFooter);
   }
 
