@@ -6,7 +6,7 @@ import {
   createHandlerBoundToURL,
 } from 'workbox-precaching';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
-import { getLastTriggerTime } from './timer';
+import { getLastTriggerTime, getTodayTrigger } from './timer';
 import { idbGet, idbSet, IDB_KEYS, type StoredAuth } from './idb';
 import { fetchNewEngagement, fetchFriendsPostedCount } from './api/engagement';
 
@@ -14,13 +14,18 @@ declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ revision: string | null; url: string }>;
 };
 
-precacheAndRoute(self.__WB_MANIFEST);
+const manifest = self.__WB_MANIFEST;
+precacheAndRoute(manifest);
 cleanupOutdatedCaches();
 
 // Serve the freshly precached index.html for all navigations so a reload after
 // the new SW takes control loads the new hashed bundle, bypassing the GitHub
 // Pages / browser HTML cache. Precache key is "index.html" (no leading slash).
-registerRoute(new NavigationRoute(createHandlerBoundToURL('index.html')));
+// Guarded: in dev mode the manifest is empty and createHandlerBoundToURL would
+// throw at evaluation time, aborting SW registration on the Vite dev server.
+if (manifest.length) {
+  registerRoute(new NavigationRoute(createHandlerBoundToURL('index.html')));
+}
 
 // Take control of open clients on activate so skipWaiting() reloads the page
 // (controllerchange fires) — otherwise the update banner's Refresh does nothing.
@@ -47,19 +52,32 @@ function showDaily(): Promise<void> {
     icon: ICON,
     badge: BADGE,
     tag: 'meenow-daily',
-  });
+  }).then(resetSilentCount);
 }
 
 function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-// Build a digest, or surface friends' activity, on a tick that would otherwise be
-// silent because the user already posted. A real notification here replaces
-// Chrome's generic "site updated" notification and keeps the push budget healthy.
-async function showPostPostedDigest(triggerMs: number, now: number): Promise<void> {
+// Minimal visible fallback, shown only when the silent budget is exhausted.
+// Reuses the digest tag so repeated fallbacks replace instead of stacking; a
+// replaced notification still counts as user-visible for the push budget. No
+// app badge: the user already posted, so nothing is pending.
+function showFallback(): Promise<void> {
+  return self.registration.showNotification('meenow', {
+    body: "You're done for today — see what friends shared",
+    icon: ICON,
+    badge: BADGE,
+    tag: 'meenow-digest',
+  }).then(resetSilentCount);
+}
+
+// Build a digest, or surface friends' activity, on a tick after the user already
+// posted. Ticks with nothing to report stay silent within the counted budget;
+// once it is exhausted the minimal fallback shows (iOS three-strikes revocation).
+async function showPostPostedDigest(triggerMs: number, late: boolean): Promise<void> {
   const auth = await idbGet<StoredAuth>(IDB_KEYS.auth);
-  if (!auth) return;
+  if (!auth) return showFallbackOrSilent();
 
   const lastSeenId = await idbGet<string>(IDB_KEYS.lastSeenNotifId);
   const digestShown = (await idbGet<number>(IDB_KEYS.digestShownTriggerMs)) ?? 0;
@@ -78,13 +96,13 @@ async function showPostPostedDigest(triggerMs: number, now: number): Promise<voi
     });
     if (eng.newestId) await idbSet(IDB_KEYS.lastSeenNotifId, eng.newestId);
     await idbSet(IDB_KEYS.digestShownTriggerMs, triggerMs);
+    await resetSilentCount();
     return;
   }
 
-  // Budget-safety fallback: once per period, on a late tick (final hour of the
-  // daytime cron window, >= 19:00 UTC), surface how many friends posted.
-  const lateTick = new Date(now).getUTCHours() >= 19;
-  if (digestShown < triggerMs && lateTick) {
+  // Once per period, on the server-flagged late-evening tick, surface how many
+  // friends posted (the flag is timezone-correct by construction server-side).
+  if (late && digestShown < triggerMs) {
     const friends = await fetchFriendsPostedCount(auth);
     if (friends > 0) {
       await self.registration.showNotification('meenow', {
@@ -94,30 +112,76 @@ async function showPostPostedDigest(triggerMs: number, now: number): Promise<voi
         tag: 'meenow-friends',
       });
       await idbSet(IDB_KEYS.digestShownTriggerMs, triggerMs);
+      await resetSilentCount();
+      return;
     }
   }
+
+  return showFallbackOrSilent();
+}
+
+// iOS/WebKit revokes the push subscription after three push events without a
+// visible notification; showing one resets its strike count. Mirror that budget:
+// no-value ticks may stay silent up to twice in a row, the third must show.
+const MAX_SILENT_PUSHES = 2;
+
+function resetSilentCount(): Promise<void> {
+  return idbSet(IDB_KEYS.silentPushCount, 0).catch(() => {});
+}
+
+// Consume one unit of the silent budget. Returns false when the budget is
+// exhausted — or when IndexedDB fails, since an uncounted silent push could be
+// the one that gets the subscription revoked — meaning something must be shown.
+async function trySilent(): Promise<boolean> {
+  try {
+    const silent = (await idbGet<number>(IDB_KEYS.silentPushCount)) ?? 0;
+    if (silent < MAX_SILENT_PUSHES) {
+      await idbSet(IDB_KEYS.silentPushCount, silent + 1);
+      return true;
+    }
+  } catch { /* cannot count — fail visible */ }
+  return false;
+}
+
+// A tick with nothing of value to report stays silent while the budget allows.
+function showFallbackOrSilent(): Promise<void> {
+  return trySilent().then(silent => (silent ? undefined : showFallback()));
+}
+
+async function handleTick(late: boolean): Promise<void> {
+  const triggerMs = getLastTriggerTime().getTime();
+
+  // Tick before today's trigger (clock skew, or a stale timezone gating the
+  // server's send) means the device is still in the previous period's tail — a
+  // notification now would be mistimed, so stay silent while the budget allows.
+  if (Date.now() < getTodayTrigger().getTime() && (await trySilent())) return;
+
+  // idbGet reads the timestamp written by the app after a successful post.
+  const notPosted = await idbGet<number>(IDB_KEYS.postedTriggerMs)
+    .then(posted => (posted ?? 0) < triggerMs)
+    .catch(() => true);
+  await (notPosted ? showDaily() : showPostPostedDigest(triggerMs, late));
 }
 
 self.addEventListener('push', event => {
-  const data: { ts?: number; force?: boolean } = event.data?.json() ?? {};
-  const now = Date.now();
-  const triggerMs = getLastTriggerTime().getTime();
-
-  // Skip ticks that arrive before the trigger (clock skew / early delivery).
-  if (now < triggerMs && !data.force) return;
+  // json() throws on malformed payloads — swallow and treat as a plain tick so
+  // even a corrupt push cannot end silently.
+  let data: { ts?: number; force?: boolean; late?: boolean } = {};
+  try {
+    data = event.data?.json() ?? {};
+  } catch { /* malformed payload */ }
 
   if (data.force) {
     event.waitUntil(showDaily().catch(err => console.error('[sw] push handler failed', err)));
     return;
   }
 
-  // Notify on every tick unless the user has already posted in this period.
-  // idbGet reads the timestamp written by the app after a successful post.
+  // Ticks with value always show; no-value ticks (pre-trigger, or post-posting
+  // with nothing to report — including errors) consume the counted silent budget
+  // and only surface the fallback once it is exhausted.
   event.waitUntil(
-    idbGet<number>(IDB_KEYS.postedTriggerMs)
-      .then(posted => (posted ?? 0) < triggerMs)
-      .catch(() => true)
-      .then(notPosted => (notPosted ? showDaily() : showPostPostedDigest(triggerMs, now)))
+    handleTick(data.late === true)
+      .catch(() => showFallbackOrSilent())
       .catch(err => console.error('[sw] push handler failed', err))
   );
 });

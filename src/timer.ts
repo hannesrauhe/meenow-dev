@@ -1,4 +1,5 @@
 // Deterministic daily trigger time using djb2 hash + xorshift32 PRNG seeded by local date.
+// The pure math lives in trigger-core.mjs, shared with scripts/send-tick.mjs.
 //
 // Terminology used throughout this codebase:
 //   trigger time      – the pseudo-random moment within a day when users are prompted to post.
@@ -12,25 +13,7 @@
 // the same wall-clock moment, so it is stable across app restarts without any server
 // coordination.
 
-const WINDOW_START_HOUR = 9;      // 9:00 AM local
-const WINDOW_MINUTES = 12 * 60;   // 9:00 AM – 9:00 PM = 720 min
-
-function djb2(s: string): number {
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) {
-    h = (Math.imul(h, 33) ^ s.charCodeAt(i)) >>> 0;
-  }
-  return h;
-}
-
-function xorshift32(seed: number): number {
-  // Non-zero seed guard: xorshift32 has a fixed point at 0.
-  let x = seed === 0 ? 2463534242 : seed;
-  x ^= x << 13;
-  x ^= x >>> 17;
-  x ^= x << 5;
-  return x >>> 0;
-}
+import { WINDOW_START_HOUR, triggerOffsetMinutes } from './trigger-core.mjs';
 
 function localDateString(d = new Date()): string {
   const y = d.getFullYear();
@@ -40,20 +23,14 @@ function localDateString(d = new Date()): string {
 }
 
 function getTriggerForDate(d: Date): Date {
-  const seed = djb2(localDateString(d));
-  // Three xorshift rounds are needed for adequate mixing: date strings for
-  // consecutive days in the same month differ only in the last character,
-  // giving djb2 hashes that are too close for a single round to spread across
-  // the 720-minute window (every day in June 2026 lands at ~16:50 with one round).
-  let x = xorshift32(seed);
-  x = xorshift32(x);
-  x = xorshift32(x);
-  const rand = x / 0x100000000; // uniform [0, 1)
-  const offsetMinutes = Math.floor(rand * WINDOW_MINUTES);
+  const offsetMinutes = triggerOffsetMinutes(localDateString(d));
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), WINDOW_START_HOUR, offsetMinutes, 0, 0);
 }
 
-function getTodayTrigger(): Date {
+// Today's trigger regardless of whether it has fired yet — before it fires the
+// device is still in the tail of the previous trigger period (the SW uses this
+// to keep pre-trigger ticks silent).
+export function getTodayTrigger(): Date {
   return getTriggerForDate(new Date());
 }
 

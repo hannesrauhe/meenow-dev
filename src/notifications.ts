@@ -1,5 +1,5 @@
 // Push notifications: VAPID subscription registration, permission request, and relay-repo subscription management.
-import { getPushSubFilename, setPushSubFilename, clearPushSubFilename, isPwaInstalled, isPwaSubbed, setPwaSubbed, getStoredVapidKey, setStoredVapidKey } from './state';
+import { getPushSubFilename, setPushSubFilename, clearPushSubFilename, isPwaInstalled, isPwaSubbed, setPwaSubbed, getStoredVapidKey, setStoredVapidKey, getSyncedTz, setSyncedTz } from './state';
 
 // These are injected at build time from GitHub repo secrets (VITE_* prefix).
 // Each deployed instance (dev.meenow.de, meenow.de) has its own secret values,
@@ -9,6 +9,16 @@ const PUSH_RELAY_TOKEN = import.meta.env.VITE_PUSH_RELAY_TOKEN as string | undef
 const PUSH_RELAY_REPO = 'meenow-de/meenow-push';
 // e.g. 'subscriptions/dev' or 'subscriptions/prod'
 const PUSH_SUBS_PATH = import.meta.env.VITE_PUSH_SUBS_PATH as string | undefined;
+
+function deviceTz(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+// Subscription file content: PushSubscription JSON plus the device IANA timezone,
+// which the send script uses to gate ticks to this device's local trigger window.
+function subFileContent(sub: PushSubscription): string {
+  return btoa(JSON.stringify({ ...sub.toJSON(), tz: deviceTz() }));
+}
 
 function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   const padding = '='.repeat((4 - (base64.length % 4)) % 4);
@@ -64,11 +74,12 @@ export async function enableNotifications(): Promise<'granted' | 'denied' | 'err
   const existingFile = getPushSubFilename();
   if (existingFile) {
     setStoredVapidKey(VAPID_PUBLIC_KEY);
+    void syncSubscriptionTz();
     return 'granted';
   }
 
   const filename = `${PUSH_SUBS_PATH}/${crypto.randomUUID()}.json`;
-  const content = btoa(JSON.stringify(sub.toJSON()));
+  const content = subFileContent(sub);
   const res = await fetch(
     `https://api.github.com/repos/${PUSH_RELAY_REPO}/contents/${filename}`,
     {
@@ -89,6 +100,7 @@ export async function enableNotifications(): Promise<'granted' | 'denied' | 'err
   setPushSubFilename(filename);
   if (isPwaInstalled()) setPwaSubbed();
   setStoredVapidKey(VAPID_PUBLIC_KEY);
+  setSyncedTz(deviceTz());
   return 'granted';
 }
 
@@ -111,7 +123,7 @@ export async function resubscribeAsPwa(): Promise<void> {
 
     clearPushSubFilename();
     const filename = `${PUSH_SUBS_PATH}/${crypto.randomUUID()}.json`;
-    const content = btoa(JSON.stringify(sub.toJSON()));
+    const content = subFileContent(sub);
     const res = await fetch(
       `https://api.github.com/repos/${PUSH_RELAY_REPO}/contents/${filename}`,
       {
@@ -128,7 +140,49 @@ export async function resubscribeAsPwa(): Promise<void> {
       setPushSubFilename(filename);
       if (isPwaInstalled()) setPwaSubbed();
       setStoredVapidKey(VAPID_PUBLIC_KEY);
+      setSyncedTz(deviceTz());
     }
+  } catch {
+    // Silent failure — will retry on the next launch.
+  }
+}
+
+// Rewrites the relay subscription file when the device timezone differs from the
+// one last written (travel, or a legacy file from before the tz field existed),
+// so the send script gates ticks to the correct local trigger window. Failures
+// are silent and retried on the next launch.
+export async function syncSubscriptionTz(): Promise<void> {
+  if (!VAPID_PUBLIC_KEY || !PUSH_RELAY_TOKEN || !PUSH_SUBS_PATH) return;
+  if (Notification.permission !== 'granted') return;
+  const filename = getPushSubFilename();
+  if (!filename || getSyncedTz() === deviceTz()) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return;
+
+    const url = `https://api.github.com/repos/${PUSH_RELAY_REPO}/contents/${filename}`;
+    const headers = {
+      'Authorization': `Bearer ${PUSH_RELAY_TOKEN}`,
+      'Content-Type': 'application/json',
+    };
+    // Updating an existing file needs its blob sha; a 404 (pruned by the cron)
+    // falls through to a sha-less PUT that re-creates the file.
+    let sha: string | undefined;
+    const getRes = await fetch(url, { headers });
+    if (getRes.ok) sha = ((await getRes.json()) as { sha?: string }).sha;
+    else if (getRes.status !== 404) return;
+
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        message: 'Update subscription timezone',
+        content: subFileContent(sub),
+        ...(sha && { sha }),
+      }),
+    });
+    if (res.ok) setSyncedTz(deviceTz());
   } catch {
     // Silent failure — will retry on the next launch.
   }
