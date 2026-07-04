@@ -39,10 +39,11 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
     }, 1000);
   }
 
-  // Wrapper around header + content + footer so pull-to-refresh can translate
-  // the whole feed while the fixed spinner (appended to `el`) rides above it.
+  el.appendChild(header);
+
+  // Wrapper around the post list + footer so pull-to-refresh can translate the
+  // feed while the sticky header stays fixed and the spinner rides behind it.
   const body = document.createElement('div');
-  body.appendChild(header);
 
   const content = document.createElement('div');
   content.id = 'feed-content';
@@ -103,27 +104,32 @@ function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, 
   const PULL_MAX = 110;
   let refreshing = false;
 
+  // px the spinner sits tucked up behind the header at rest; it slides out from
+  // under the bar as the feed is pulled down past this offset.
+  const SPINNER_HIDE = 36;
+
   const indicator = document.createElement('div');
-  indicator.className = 'fixed left-1/2 z-20 pointer-events-none top-[calc(env(safe-area-inset-top,0px)+4rem)]';
+  // z-0 keeps the spinner behind the sticky header (z-10) so it is masked at
+  // rest, while — being positioned — it still paints above the static feed body.
+  indicator.className = 'fixed left-1/2 z-0 pointer-events-none top-[calc(env(safe-area-inset-top,0px)+4rem)]';
   indicator.style.opacity = '0';
-  indicator.style.transform = 'translateX(-50%) translateY(0) scale(0.6)';
+  indicator.style.transform = `translateX(-50%) translateY(-${SPINNER_HIDE}px) scale(0.6)`;
   indicator.innerHTML = '<div class="w-7 h-7 spinner"></div>';
   el.appendChild(indicator);
 
   const setPull = (d: number): void => {
     const p = Math.min(1, d / PULL_THRESHOLD);
     indicator.style.opacity = String(p);
-    indicator.style.transform = `translateX(-50%) translateY(${d}px) scale(${0.6 + 0.4 * p})`;
+    indicator.style.transform = `translateX(-50%) translateY(${d - SPINNER_HIDE}px) scale(${0.6 + 0.4 * p})`;
     body.style.transform = `translateY(${d}px)`;
   };
   const resetPull = (): void => {
     indicator.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
     indicator.style.opacity = '0';
-    indicator.style.transform = 'translateX(-50%) translateY(0) scale(0.6)';
+    indicator.style.transform = `translateX(-50%) translateY(-${SPINNER_HIDE}px) scale(0.6)`;
     body.style.transition = 'transform 0.2s ease';
     body.style.transform = 'translateY(0)';
-    // Clear the transform at rest so it never establishes a containing block that
-    // would break the sticky header / backdrop-blur once the animation finishes.
+    // Clear the feed transform at rest so it never establishes a containing block.
     setTimeout(() => { indicator.style.transition = ''; body.style.transition = ''; body.style.transform = ''; }, 220);
   };
 
@@ -132,8 +138,8 @@ function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, 
     refreshing = true;
     indicator.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
     indicator.style.opacity = '1';
-    indicator.style.transform = `translateX(-50%) translateY(${Math.round(PULL_THRESHOLD * 0.6)}px) scale(1)`;
-    // Snap the feed back while the spinner stays pinned during the load.
+    // Hold the spinner just below the bar while the feed snaps back and reloads.
+    indicator.style.transform = `translateX(-50%) translateY(${Math.round(PULL_THRESHOLD * 0.4)}px) scale(1)`;
     body.style.transition = 'transform 0.2s ease';
     body.style.transform = 'translateY(0)';
     try {
