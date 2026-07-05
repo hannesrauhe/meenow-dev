@@ -382,7 +382,9 @@ async function init(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
   const code = params.get('code');
   const add = params.get('add');
-  if (code || add) {
+  // Set by the daily-reminder notification tap (issue #56) to open capture.
+  const action = params.get('action');
+  if (code || add || action) {
     history.replaceState({}, '', window.location.pathname);
   }
   if (code) {
@@ -443,6 +445,23 @@ async function init(): Promise<void> {
   if (pendingAdd && getAuthState()) {
     clearPendingAdd();
     mountConnectLanding(pendingAdd);
+  }
+
+  // A daily-reminder notification tap on a cold start lands here via
+  // ?action=capture; open capture on top of the now-mounted feed (issue #56).
+  if (action === 'capture' && getAuthState()) {
+    mountCapture();
+  }
+
+  // Warm case: the app was already open when the notification was tapped, so the
+  // service worker focuses the window and posts the intent instead.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (e: MessageEvent) => {
+      if (e.data?.type === 'notification-action' && e.data.action === 'capture'
+          && getAuthState() && activeScreen !== 'capturing') {
+        mountCapture();
+      }
+    });
   }
 }
 

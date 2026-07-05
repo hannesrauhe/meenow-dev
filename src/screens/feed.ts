@@ -41,9 +41,13 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
 
   el.appendChild(header);
 
+  // Wrapper around the post list + footer so pull-to-refresh can translate the
+  // feed while the sticky header stays fixed and the spinner rides behind it.
+  const body = document.createElement('div');
+
   const content = document.createElement('div');
   content.id = 'feed-content';
-  el.appendChild(content);
+  body.appendChild(content);
 
   const footer = document.createElement('footer');
   footer.className = 'py-6 text-center text-xs text-ink/25 space-y-2';
@@ -69,14 +73,15 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
   logoutBtn.addEventListener('click', () => { clearAuth(); window.location.reload(); });
   footer.appendChild(logoutBtn);
 
-  el.appendChild(footer);
+  body.appendChild(footer);
+  el.appendChild(body);
 
   header.querySelector('#btn-post-again')?.addEventListener('click', onRequestCapture);
   header.querySelector('#btn-open-grid')?.addEventListener('click', onOpenGrid);
   header.querySelector('#btn-open-circle')?.addEventListener('click', onOpenCircle);
 
   if (auth) {
-    setupRefresh(el, content, auth, postCount, onOpenPost);
+    setupRefresh(el, body, content, auth, postCount, onOpenPost);
     loadFeed(content, auth, postCount, onOpenPost);
     // Mark the circle icon when follow requests are waiting.
     void fetchPendingRequestCount(auth).then(count => {
@@ -94,28 +99,38 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
 // Pull-to-refresh + foreground refresh. iOS standalone PWAs have no native
 // pull-to-refresh, and Android's is disabled via overscroll-behavior (style.css),
 // so this custom gesture is the single source of truth on both platforms.
-function setupRefresh(el: HTMLElement, content: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void): void {
+function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void): void {
   const PULL_THRESHOLD = 70; // px of (damped) pull needed to trigger a refresh
   const PULL_MAX = 110;
   let refreshing = false;
 
+  // px the spinner sits tucked up behind the header at rest; it slides out from
+  // under the bar as the feed is pulled down past this offset.
+  const SPINNER_HIDE = 36;
+
   const indicator = document.createElement('div');
-  indicator.className = 'fixed left-1/2 z-20 pointer-events-none top-[calc(env(safe-area-inset-top,0px)+4rem)]';
+  // z-0 keeps the spinner behind the sticky header (z-10) so it is masked at
+  // rest, while — being positioned — it still paints above the static feed body.
+  indicator.className = 'fixed left-1/2 z-0 pointer-events-none top-[calc(env(safe-area-inset-top,0px)+4rem)]';
   indicator.style.opacity = '0';
-  indicator.style.transform = 'translateX(-50%) translateY(0) scale(0.6)';
+  indicator.style.transform = `translateX(-50%) translateY(-${SPINNER_HIDE}px) scale(0.6)`;
   indicator.innerHTML = '<div class="w-7 h-7 spinner"></div>';
   el.appendChild(indicator);
 
   const setPull = (d: number): void => {
     const p = Math.min(1, d / PULL_THRESHOLD);
     indicator.style.opacity = String(p);
-    indicator.style.transform = `translateX(-50%) translateY(${d}px) scale(${0.6 + 0.4 * p})`;
+    indicator.style.transform = `translateX(-50%) translateY(${d - SPINNER_HIDE}px) scale(${0.6 + 0.4 * p})`;
+    body.style.transform = `translateY(${d}px)`;
   };
   const resetPull = (): void => {
     indicator.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
     indicator.style.opacity = '0';
-    indicator.style.transform = 'translateX(-50%) translateY(0) scale(0.6)';
-    setTimeout(() => { indicator.style.transition = ''; }, 220);
+    indicator.style.transform = `translateX(-50%) translateY(-${SPINNER_HIDE}px) scale(0.6)`;
+    body.style.transition = 'transform 0.2s ease';
+    body.style.transform = 'translateY(0)';
+    // Clear the feed transform at rest so it never establishes a containing block.
+    setTimeout(() => { indicator.style.transition = ''; body.style.transition = ''; body.style.transform = ''; }, 220);
   };
 
   const refresh = async (): Promise<void> => {
@@ -123,7 +138,10 @@ function setupRefresh(el: HTMLElement, content: HTMLElement, auth: AuthState, po
     refreshing = true;
     indicator.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
     indicator.style.opacity = '1';
-    indicator.style.transform = `translateX(-50%) translateY(${Math.round(PULL_THRESHOLD * 0.6)}px) scale(1)`;
+    // Hold the spinner just below the bar while the feed snaps back and reloads.
+    indicator.style.transform = `translateX(-50%) translateY(${Math.round(PULL_THRESHOLD * 0.4)}px) scale(1)`;
+    body.style.transition = 'transform 0.2s ease';
+    body.style.transform = 'translateY(0)';
     try {
       await loadFeed(content, auth, postCount, onOpenPost, true);
     } finally {
@@ -149,6 +167,7 @@ function setupRefresh(el: HTMLElement, content: HTMLElement, auth: AuthState, po
     // scrolling is never blocked. Requires a non-passive listener.
     e.preventDefault();
     indicator.style.transition = '';
+    body.style.transition = '';
     dist = Math.min(PULL_MAX, dy * 0.5);
     setPull(dist);
   }, { passive: false });
@@ -302,6 +321,12 @@ function makePostCard(post: FeedPost, unblurred: boolean, onOpenPost: (post: Fee
     const countEl = document.createElement('span');
     countEl.textContent = `${post.replyCount}`;
     cardFooter.appendChild(countEl);
+    // Open the detail (with replies) on tap, gated like the photo so a blurred
+    // feed stays unreachable until the user posts.
+    if (unblurred) {
+      cardFooter.classList.add('cursor-pointer');
+      cardFooter.addEventListener('click', () => onOpenPost(post));
+    }
     card.appendChild(cardFooter);
   }
 
