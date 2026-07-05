@@ -36,6 +36,10 @@ export function setPwaSubbed(): void {
   localStorage.setItem('meenow:pwa-subbed', 'true');
 }
 
+export function clearPwaSubbed(): void {
+  localStorage.removeItem('meenow:pwa-subbed');
+}
+
 // Stores the VAPID public key used when the active push subscription was created.
 // On app load, a mismatch against the build-time key indicates key rotation and
 // triggers an automatic re-subscribe with the new key.
