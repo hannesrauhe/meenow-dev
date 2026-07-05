@@ -1,5 +1,5 @@
 // Push notifications: VAPID subscription registration, permission request, and relay-repo subscription management.
-import { getPushSubFilename, setPushSubFilename, clearPushSubFilename, isPwaInstalled, isPwaSubbed, setPwaSubbed, getStoredVapidKey, setStoredVapidKey, getSyncedTz, setSyncedTz } from './state';
+import { getPushSubFilename, setPushSubFilename, clearPushSubFilename, isPwaInstalled, isPwaSubbed, setPwaSubbed, clearPwaSubbed, getStoredVapidKey, setStoredVapidKey, getSyncedTz, setSyncedTz } from './state';
 
 // These are injected at build time from GitHub repo secrets (VITE_* prefix).
 // Each deployed instance (dev.meenow.de, meenow.de) has its own secret values,
@@ -98,7 +98,7 @@ export async function enableNotifications(): Promise<'granted' | 'denied' | 'err
   }
 
   setPushSubFilename(filename);
-  if (isPwaInstalled()) setPwaSubbed();
+  isPwaInstalled() ? setPwaSubbed() : clearPwaSubbed();
   setStoredVapidKey(VAPID_PUBLIC_KEY);
   setSyncedTz(deviceTz());
   return 'granted';
@@ -138,7 +138,7 @@ export async function resubscribeAsPwa(): Promise<void> {
 
     if (res.ok) {
       setPushSubFilename(filename);
-      if (isPwaInstalled()) setPwaSubbed();
+      isPwaInstalled() ? setPwaSubbed() : clearPwaSubbed();
       setStoredVapidKey(VAPID_PUBLIC_KEY);
       setSyncedTz(deviceTz());
     }

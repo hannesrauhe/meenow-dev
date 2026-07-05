@@ -4,7 +4,7 @@ declare const __GIT_HASH__: string;
 import './style.css';
 import { getAuthState, handleOAuthCallback, dropTokenIfScopesStale } from './api/auth';
 import { getLastTriggerTime, type AppState } from './timer';
-import { MAX_POSTS_PER_TRIGGER, getPendingAdd, setPendingAdd, clearPendingAdd } from './state';
+import { MAX_POSTS_PER_TRIGGER, getPendingAdd, setPendingAdd, clearPendingAdd, clearPwaSubbed } from './state';
 import { fetchTodayPostCount, deletePost, removePostFromCache } from './api/pixelfed';
 import type { Connection } from './api/social';
 import { renderCapture } from './screens/capture';
@@ -400,6 +400,13 @@ async function init(): Promise<void> {
   // can't perform relationship writes, so drop them and let the login screen
   // prompt a single re-authentication with the current scopes.
   dropTokenIfScopesStale();
+
+  // A (re)install invalidates the PWA-routing flag: the surviving push
+  // subscription belongs to the previous install's context (localStorage
+  // outlives the WebAPK, so the flag would otherwise stay stale and Chrome
+  // keeps showing the notifications), so the first standalone launch after
+  // install must re-subscribe.
+  window.addEventListener('appinstalled', clearPwaSubbed);
 
   // Re-subscribe if the VAPID key was rotated or if the subscription was created
   // in a browser tab and needs to be re-created in the installed PWA context.
