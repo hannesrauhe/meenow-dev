@@ -1,7 +1,7 @@
 // Capture screen: dual-camera photo capture flow (back camera then selfie), composite stitching, preview with optional caption/location, and post submission.
 import { MAX_POSTS_PER_TRIGGER, isIOS, isPwaInstalled } from '../state';
 import { getAuthState } from '../api/auth';
-import { postMeenow } from '../api/pixelfed';
+import { postMeenow, type PostProgress } from '../api/pixelfed';
 import { CAT_EARS_SHUTTER } from '../icons';
 
 const CAMERA_SWITCH_DELAY_MS = 600; // browser needs time to release back camera before front opens
@@ -181,8 +181,9 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
   let previewUrl: string | null = null;
   let statusText = '';
   let locationText = '';
+  let progress: PostProgress = {};
 
-  function show(step: Step, message = ''): void {
+  function show(step: Step, message = '', detail = ''): void {
     stopAllStreams();
     if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
     root.className = step === 'back' || step === 'front' || step === 'preview'
@@ -196,7 +197,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     else if (step === 'front') root.appendChild(makeFrontCamera());
     else if (step === 'preview') root.appendChild(makePreview());
     else if (step === 'uploading') root.appendChild(makeSpinner());
-    else root.appendChild(makeError(message));
+    else root.appendChild(makeError(message, detail));
   }
 
   function makeStart(): HTMLElement {
@@ -311,6 +312,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     stopAllStreams();
     compositeBlob = await stitchPhotos(backBlob!, frontBlob).catch(() => null);
     if (!compositeBlob) { show('error', 'Failed to stitch photos.'); return; }
+    progress = {};
     show('preview');
   }
 
@@ -394,6 +396,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     retakeBtn.textContent = 'Retake';
     retakeBtn.addEventListener('click', () => {
       backBlob = null; frontBlob = null; compositeBlob = null;
+      progress = {};
       show('start'); // show() revokes previewUrl
     });
     btnRow.appendChild(retakeBtn);
@@ -415,13 +418,18 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     if (!auth) { show('error', 'Not logged in.'); return; }
     try {
       const parts = [statusText.trim(), locationText.trim()].filter(Boolean);
-      await postMeenow(auth, compositeBlob!, backBlob!, frontBlob!, parts.join('\n') || undefined);
+      await postMeenow(auth, compositeBlob!, backBlob!, frontBlob!, parts.join('\n') || undefined, progress);
       statusText = '';
       locationText = '';
+      progress = {};
       onPosted();
       onDone();
     } catch (err) {
-      show('error', err instanceof Error ? err.message : 'Upload failed.');
+      if (err instanceof TypeError) {
+        show('error', 'Network problem — your photo is safe.', err.message);
+      } else {
+        show('error', err instanceof Error ? err.message : 'Upload failed.');
+      }
     }
   }
 
@@ -444,18 +452,36 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     return d;
   }
 
-  function makeError(message: string): HTMLElement {
+  function makeError(message: string, detail = ''): HTMLElement {
     const d = document.createElement('div');
     d.className = 'flex flex-col items-center gap-6 max-w-xs';
     const p = document.createElement('p');
     p.className = 'text-sm text-ink/70 leading-relaxed';
     p.textContent = message;
     d.appendChild(p);
+    if (detail) {
+      const dp = document.createElement('p');
+      dp.className = 'text-xs text-ink/40';
+      dp.textContent = detail;
+      d.appendChild(dp);
+    }
     const btn = document.createElement('button');
     btn.className = 'btn-primary';
     btn.textContent = 'Try again';
-    btn.addEventListener('click', () => show('start'));
-    d.appendChild(btn);
+    // A completed photo means the failure was in the upload: retry the post
+    // with the same blobs instead of restarting the camera flow.
+    if (compositeBlob) {
+      btn.addEventListener('click', () => void upload());
+      d.appendChild(btn);
+      const backBtn = document.createElement('button');
+      backBtn.className = 'border border-ink/20 text-ink rounded-full py-3 px-6 text-sm font-medium';
+      backBtn.textContent = 'Back to preview';
+      backBtn.addEventListener('click', () => show('preview'));
+      d.appendChild(backBtn);
+    } else {
+      btn.addEventListener('click', () => show('start'));
+      d.appendChild(btn);
+    }
     return d;
   }
 
