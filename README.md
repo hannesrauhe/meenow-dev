@@ -84,6 +84,7 @@ No hardcoded `client_id` or `client_secret`. On first use with a given instance:
 - Home timeline and own statuses merged and deduplicated.
 - Filtered to the current trigger period (posts since the last trigger time); only statuses tagged `#meenowApp` are shown.
 - If the user has not posted in the current trigger period: images are blurred with a “Post yours to unblur” prompt.
+- Every successful feed load reconciles the in-memory post count against the fetched timeline, so a stale count (e.g. from a failed page-load fetch) corrects itself on pull-to-refresh.
 - Empty state: sleeping cat illustration.
 
 ### Push Notifications

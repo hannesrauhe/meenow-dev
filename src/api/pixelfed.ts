@@ -181,7 +181,12 @@ function fetchHomeTimeline(auth: AuthState): Promise<MastodonStatus[]> {
     : `https://${auth.instance}/api/v1/timelines/home?limit=${HOME_TIMELINE_LIMIT}`;
 
   _homePending = fetch(url, { headers: { Authorization: `Bearer ${auth.accessToken}` } })
-    .then(r => (r.ok ? (r.json() as Promise<MastodonStatus[]>) : Promise.resolve([])))
+    .then(r => {
+      // A failed fetch must reject, not resolve empty: an empty result would be
+      // cached and render as a legitimately empty feed / zero post count.
+      if (!r.ok) throw new Error(`Home timeline fetch failed (${r.status})`);
+      return r.json() as Promise<MastodonStatus[]>;
+    })
     .then(incoming => {
       const now = Date.now();
       if (_homeCache) {
