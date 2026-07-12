@@ -143,7 +143,7 @@ function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, 
     body.style.transition = 'transform 0.2s ease';
     body.style.transform = 'translateY(0)';
     try {
-      await loadFeed(content, auth, postCount, onOpenPost, onPostCountChange, true);
+      await loadFeed(content, auth, postCount, onOpenPost, onPostCountChange, true, true);
     } finally {
       resetPull();
       refreshing = false;
@@ -197,7 +197,8 @@ function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, 
 // `silent` skips the full-screen spinner and keeps the existing cards on screen
 // (used by pull-to-refresh and foreground refresh, where the loading cue lives
 // elsewhere); on failure it leaves the current feed untouched.
-async function loadFeed(container: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void, onPostCountChange: (count: number) => void, silent = false): Promise<void> {
+// `force` bypasses the home-timeline cache TTL (explicit user refresh).
+async function loadFeed(container: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void, onPostCountChange: (count: number) => void, silent = false, force = false): Promise<void> {
 
   if (!silent) {
     container.innerHTML = `
@@ -209,7 +210,7 @@ async function loadFeed(container: HTMLElement, auth: AuthState, postCount: numb
 
   let posts: FeedPost[];
   try {
-    posts = await fetchMeenowFeed(auth);
+    posts = await fetchMeenowFeed(auth, force);
   } catch {
     if (silent) return;
     container.innerHTML = `
