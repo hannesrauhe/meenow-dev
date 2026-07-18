@@ -9,6 +9,7 @@ import { MAX_POSTS_PER_TRIGGER } from '../state';
 interface MastodonAccount {
   id: string;
   username: string;
+  acct: string;
   display_name: string;
   avatar: string;
   url: string;
@@ -48,7 +49,9 @@ export interface FeedPost {
     id: string;
     displayName: string;
     username: string;
+    acct: string;
     avatarUrl: string;
+    url: string;
   };
   compositeUrl: string;
   allMediaUrls: string[];
@@ -295,7 +298,9 @@ function toFeedPost(s: MastodonStatus): FeedPost {
       id: s.account.id,
       displayName: s.account.display_name || s.account.username,
       username: s.account.username,
+      acct: s.account.acct || s.account.username,
       avatarUrl: s.account.avatar,
+      url: s.account.url,
     },
     compositeUrl: s.media_attachments[0]?.url ?? '',
     allMediaUrls: s.media_attachments.map(m => m.url),

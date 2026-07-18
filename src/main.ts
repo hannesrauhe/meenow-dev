@@ -201,6 +201,14 @@ function mountCapture(): void {
   }));
 }
 
+// Converts a post author into the Connection shape the peer screen expects.
+function toPeer(a: FeedPost['account']): Connection {
+  return { id: a.id, displayName: a.displayName, username: a.username, acct: a.acct, avatarUrl: a.avatarUrl, url: a.url };
+}
+
+// Post detail with nested peer navigation (same pattern as mountGrid →
+// mountPostDetail): hardware back from the author's peer screen returns to the
+// detail view, not the screen below it.
 function mountPostDetail(post: FeedPost, onClose?: () => void): void {
   const auth = getAuthState();
   if (!auth) return;
@@ -212,8 +220,11 @@ function mountPostDetail(post: FeedPost, onClose?: () => void): void {
   history.pushState({ screen: 'post_detail' }, '');
 
   const returnTo = onClose ?? tick;
-  const onPopState = () => { activeScreen = null; returnTo(); };
-  window.addEventListener('popstate', onPopState, { once: true });
+  let popHandler: (() => void) | null = null;
+  const installPop = (): void => {
+    popHandler = () => { popHandler = null; activeScreen = null; returnTo(); };
+    window.addEventListener('popstate', popHandler, { once: true });
+  };
 
   const onDeletePost = async (): Promise<void> => {
     await deletePost(auth, post.id);
@@ -221,13 +232,27 @@ function mountPostDetail(post: FeedPost, onClose?: () => void): void {
     history.back();
   };
 
+  const openPeer = (a: FeedPost['account']): void => {
+    if (popHandler) { window.removeEventListener('popstate', popHandler); popHandler = null; }
+    mountPeerConnections(toPeer(a), () => {
+      activeScreen = 'post_detail';
+      app.innerHTML = '';
+      installPop();
+      app.appendChild(renderDetail());
+    });
+  };
+
+  const renderDetail = (): HTMLElement => renderPostDetail(post, auth, () => {
+    history.back();
+  }, onDeletePost, openPeer);
+
+  installPop();
+
   let el: HTMLElement;
   try {
-    el = renderPostDetail(post, auth, () => {
-      history.back();
-    }, onDeletePost);
+    el = renderDetail();
   } catch {
-    window.removeEventListener('popstate', onPopState);
+    if (popHandler) { window.removeEventListener('popstate', popHandler); popHandler = null; }
     history.back();
     activeScreen = null;
     return;
@@ -347,7 +372,7 @@ function mount(screen: AppState | 'login'): void {
     removeInstallNudge();
     app.appendChild(renderLogin());
   } else {
-    app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid, mountCircle, onPostCountRefresh));
+    app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid, mountCircle, a => mountPeerConnections(toPeer(a)), onPostCountRefresh));
     // Show only one bottom banner — both are fixed bottom-0 and would overlap.
     const installShown = renderInstallNudge();
     if (!installShown) void renderNotificationNudge();

@@ -24,10 +24,23 @@ export function renderPeerConnections(auth: AuthState, peer: Connection, onBack:
   backBtn.addEventListener('click', onBack);
   header.appendChild(backBtn);
 
+  const titleCol = document.createElement('div');
+  titleCol.className = 'flex-1 min-w-0';
+
   const title = document.createElement('h1');
   title.className = 'text-base font-semibold text-ink truncate';
   title.textContent = peer.displayName;
-  header.appendChild(title);
+  titleCol.appendChild(title);
+
+  const profileLink = document.createElement('a');
+  profileLink.href = peer.url;
+  profileLink.target = '_blank';
+  profileLink.rel = 'noopener noreferrer';
+  profileLink.className = 'text-xs text-gold truncate block';
+  profileLink.textContent = `@${peer.acct} ↗`;
+  titleCol.appendChild(profileLink);
+
+  header.appendChild(titleCol);
 
   root.appendChild(header);
 
