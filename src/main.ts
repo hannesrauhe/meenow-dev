@@ -31,8 +31,10 @@ let tickId: number | null = null;
 // Post count for the current trigger period. Fetched from the server on every
 // page load so multi-device state is always up-to-date — no localStorage cache.
 // Re-derived on every feed load via onPeriodCountChange so it stays in sync
-// with what the refreshed feed shows.
-let periodPostCount = 0;
+// with what the refreshed feed shows. null = unknown (the fetch failed, e.g.
+// flaky network): the feed header then withholds "+ Post" so a stale 0 can't
+// invite a double post; a later successful feed load establishes the count.
+let periodPostCount: number | null = null;
 
 // Tracks the boundary of the last known trigger period so the tick loop can
 // detect when a new period starts (trigger fires while the app is open) and
@@ -166,11 +168,13 @@ const updateSW = registerSW({
   onNeedRefresh() { showUpdateBanner(updateSW); },
 });
 
-// Feed loads re-derive the count from the refreshed timeline (see loadFeed); a
-// changed value means the page-load fetch was stale (timeline lag, transient
-// error) or a post was deleted on Pixelfed directly — sync and re-render.
+// Every successful feed load re-derives the count from the refreshed timeline
+// (see loadFeed) and reports it here; a change means the page-load fetch was
+// stale or failed (timeline lag, flaky network) or a post was deleted on
+// Pixelfed directly — sync and re-render.
 function onPeriodCountChange(count: number): void {
-  if (periodPostCount === 0 && count > 0) {
+  if (count === periodPostCount) return;
+  if (!periodPostCount && count > 0) {
     void idbSet(IDB_KEYS.postedTriggerMs, getLastTriggerTime().getTime());
   }
   periodPostCount = count;
@@ -178,10 +182,10 @@ function onPeriodCountChange(count: number): void {
 }
 
 function onPosted(): void {
-  if (periodPostCount === 0) {
+  if (!periodPostCount) {
     void idbSet(IDB_KEYS.postedTriggerMs, getLastTriggerTime().getTime());
   }
-  periodPostCount = Math.min(periodPostCount + 1, MAX_POSTS_PER_TRIGGER);
+  periodPostCount = Math.min((periodPostCount ?? 0) + 1, MAX_POSTS_PER_TRIGGER);
   clearAppBadge();
 }
 
@@ -196,7 +200,7 @@ function mountCapture(): void {
   const onPopState = () => { activeScreen = null; tick(); };
   window.addEventListener('popstate', onPopState, { once: true });
 
-  app.appendChild(renderCapture(periodPostCount, onPosted, () => {
+  app.appendChild(renderCapture(periodPostCount ?? 0, onPosted, () => {
     history.back();
   }));
 }
@@ -451,7 +455,9 @@ async function init(): Promise<void> {
         void idbSet(IDB_KEYS.postedTriggerMs, getLastTriggerTime().getTime());
       }
     } catch {
-      periodPostCount = 0;
+      // Unknown, not zero: the header hides "+ Post" and the feed shows a
+      // retry; a successful load then sets the count via onPeriodCountChange.
+      periodPostCount = null;
     }
   }
 

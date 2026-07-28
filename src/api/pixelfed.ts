@@ -181,7 +181,10 @@ function fetchHomeTimeline(auth: AuthState): Promise<MastodonStatus[]> {
     : `https://${auth.instance}/api/v1/timelines/home?limit=${HOME_TIMELINE_LIMIT}`;
 
   _homePending = fetch(url, { headers: { Authorization: `Bearer ${auth.accessToken}` } })
-    .then(r => (r.ok ? (r.json() as Promise<MastodonStatus[]>) : Promise.resolve([])))
+    .then(r => {
+      if (!r.ok) throw new Error(`Timeline fetch failed (${r.status})`);
+      return r.json() as Promise<MastodonStatus[]>;
+    })
     .then(incoming => {
       const now = Date.now();
       if (_homeCache) {
@@ -198,7 +201,15 @@ function fetchHomeTimeline(auth: AuthState): Promise<MastodonStatus[]> {
       _homePending = null;
       return _homeCache.statuses;
     })
-    .catch(err => { _homePending = null; throw err; });
+    .catch(err => {
+      _homePending = null;
+      // A failed refresh must never masquerade as an empty timeline (that made
+      // the app show 0 posts / count 0 after a flaky request). With a prior
+      // cache, serve it stale — fetchedAt stays expired so the next call
+      // retries; with nothing cached, surface the failure to the caller.
+      if (_homeCache) return _homeCache.statuses;
+      throw err;
+    });
 
   return _homePending;
 }
@@ -307,20 +318,18 @@ export async function fetchMeenowFeed(auth: AuthState): Promise<FeedPost[]> {
     .map(toFeedPost);
 }
 
+// Throws when the count cannot be determined — callers must not treat a failed
+// fetch as "not posted yet" (that allowed accidental double-posting).
 export async function fetchTodayPostCount(auth: AuthState): Promise<number> {
   const accountId = await resolveAccountId(auth);
-  if (!accountId) return 0;
+  if (!accountId) throw new Error('Could not resolve account id');
   const periodStart = getLastTriggerTime().getTime();
-  try {
-    const statuses = await fetchHomeTimeline(auth);
-    return statuses.filter(s =>
-      s.account.id === accountId &&
-      new Date(s.created_at).getTime() >= periodStart &&
-      hasMeenowTag(s)
-    ).length;
-  } catch {
-    return 0;
-  }
+  const statuses = await fetchHomeTimeline(auth);
+  return statuses.filter(s =>
+    s.account.id === accountId &&
+    new Date(s.created_at).getTime() >= periodStart &&
+    hasMeenowTag(s)
+  ).length;
 }
 
 async function fetchArchivedStatuses(auth: AuthState): Promise<MastodonStatus[]> {

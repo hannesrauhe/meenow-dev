@@ -6,7 +6,10 @@ import { fetchMeenowFeed, fetchTodayPostCount, type FeedPost } from '../api/pixe
 import { fetchPendingRequestCount } from '../api/social';
 import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime, formatCountdown, formatRelativeTime } from '../timer';
 
-export function renderFeed(onRequestCapture: () => void, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenGrid: () => void, onOpenCircle: () => void, onCountChange?: (count: number) => void): HTMLElement {
+// postCount null = unknown (the page-load count fetch failed): withhold the
+// "+ Post" button so a user who already posted can't accidentally post again;
+// the button appears once a feed load succeeds and reports the real count.
+export function renderFeed(onRequestCapture: () => void, postCount: number | null, onOpenPost: (post: FeedPost) => void, onOpenGrid: () => void, onOpenCircle: () => void, onCountChange?: (count: number) => void): HTMLElement {
   const auth = getAuthState();
   const el = document.createElement('div');
   el.className = 'min-h-dvh flex flex-col bg-cream';
@@ -14,12 +17,13 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
 
   const header = document.createElement('header');
   header.className = 'sticky top-0 z-10 bg-cream/95 backdrop-blur-sm flex items-center justify-between px-5 pb-4 pt-[calc(env(safe-area-inset-top,0px)+1rem)] border-b border-ink/10';
-  const atQuota = postCount >= MAX_POSTS_PER_TRIGGER;
+  const countKnown = postCount !== null;
+  const atQuota = countKnown && postCount >= MAX_POSTS_PER_TRIGGER;
   header.innerHTML = `
     <h1 class="text-xl font-semibold tracking-tight text-ink">meenow</h1>
     <div class="flex items-center gap-3">
-      ${!atQuota ? `<button id="btn-post-again" class="text-sm font-semibold text-gold">+ Post</button>` : ''}
-      <span id="header-status" class="text-xs text-ink/40">${!atQuota ? `${postCount}/${MAX_POSTS_PER_TRIGGER} posted` : ''}</span>
+      ${countKnown && !atQuota ? `<button id="btn-post-again" class="text-sm font-semibold text-gold">+ Post</button>` : ''}
+      <span id="header-status" class="text-xs text-ink/40">${countKnown && !atQuota ? `${postCount}/${MAX_POSTS_PER_TRIGGER} posted` : ''}</span>
       <button id="btn-open-circle" class="relative w-6 h-6 text-ink/50 hover:text-ink transition-colors" aria-label="Your circle">${PEOPLE_ICON}</button>
       <button id="btn-open-grid" class="w-6 h-6 text-ink/50 hover:text-ink transition-colors" aria-label="My Photos">${GRID_ICON}</button>
     </div>
@@ -99,7 +103,7 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
 // Pull-to-refresh + foreground refresh. iOS standalone PWAs have no native
 // pull-to-refresh, and Android's is disabled via overscroll-behavior (style.css),
 // so this custom gesture is the single source of truth on both platforms.
-function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void, onCountChange?: (count: number) => void): void {
+function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, auth: AuthState, postCount: number | null, onOpenPost: (post: FeedPost) => void, onCountChange?: (count: number) => void): void {
   const PULL_THRESHOLD = 70; // px of (damped) pull needed to trigger a refresh
   const PULL_MAX = 110;
   let refreshing = false;
@@ -197,7 +201,7 @@ function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, 
 // `silent` skips the full-screen spinner and keeps the existing cards on screen
 // (used by pull-to-refresh and foreground refresh, where the loading cue lives
 // elsewhere); on failure it leaves the current feed untouched.
-async function loadFeed(container: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void, onCountChange?: (count: number) => void, silent = false): Promise<void> {
+async function loadFeed(container: HTMLElement, auth: AuthState, postCount: number | null, onOpenPost: (post: FeedPost) => void, onCountChange?: (count: number) => void, silent = false): Promise<void> {
 
   if (!silent) {
     container.innerHTML = `
@@ -214,8 +218,8 @@ async function loadFeed(container: HTMLElement, auth: AuthState, postCount: numb
     if (silent) return;
     container.innerHTML = `
       <div class="flex flex-col items-center py-16 gap-3 text-center px-6">
-        <p class="text-sm text-ink/50">Could not load the feed.</p>
-        <button id="btn-feed-retry" class="text-sm text-gold underline underline-offset-2">Retry</button>
+        <p class="text-sm text-ink/50">Couldn’t load the feed — check your connection.</p>
+        <button id="btn-feed-retry" class="text-sm text-gold underline underline-offset-2">Try again</button>
       </div>
     `;
     container.querySelector('#btn-feed-retry')?.addEventListener('click', () => loadFeed(container, auth, postCount, onOpenPost, onCountChange));
@@ -223,12 +227,13 @@ async function loadFeed(container: HTMLElement, auth: AuthState, postCount: numb
   }
 
   // Re-derive the period post count from the just-refreshed timeline cache, so a
-  // post the initial page-load fetch missed (timeline lag or a transient error)
-  // corrects the header instead of drifting from what the feed shows.
-  void fetchTodayPostCount(auth).then(count => {
-    const clamped = Math.min(count, MAX_POSTS_PER_TRIGGER);
-    if (clamped !== postCount) onCountChange?.(clamped);
-  });
+  // post the initial page-load fetch missed (timeline lag or a failed request)
+  // corrects the header instead of drifting from what the feed shows. Reported
+  // unconditionally: main.ts ignores an unchanged value, but a first successful
+  // load after an unknown count (null) must establish it even when it is 0.
+  void fetchTodayPostCount(auth)
+    .then(count => onCountChange?.(Math.min(count, MAX_POSTS_PER_TRIGGER)))
+    .catch(() => { /* keep the last known count */ });
 
   container.innerHTML = '';
 
@@ -242,7 +247,7 @@ async function loadFeed(container: HTMLElement, auth: AuthState, postCount: numb
     return;
   }
 
-  const unblurred = postCount > 0;
+  const unblurred = postCount !== null && postCount > 0;
   posts.forEach(post => container.appendChild(makePostCard(post, unblurred, onOpenPost)));
 }
 
