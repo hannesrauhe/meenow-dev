@@ -172,6 +172,19 @@ function onPosted(): void {
   clearAppBadge();
 }
 
+// Called by the feed with a fresh own-post count after every successful feed
+// load, so a stale count (e.g. the page-load fetch failed) is corrected on
+// pull-to-refresh / foreground refresh instead of persisting until reload.
+function onPostCountRefresh(count: number): void {
+  const clamped = Math.min(count, MAX_POSTS_PER_TRIGGER);
+  if (clamped === periodPostCount) return;
+  if (periodPostCount === 0 && clamped > 0) {
+    void idbSet(IDB_KEYS.postedTriggerMs, getLastTriggerTime().getTime());
+  }
+  periodPostCount = clamped;
+  if (activeScreen === 'feed') mount('feed');
+}
+
 function mountCapture(): void {
   activeScreen = 'capturing';
   app.innerHTML = '';
@@ -334,7 +347,7 @@ function mount(screen: AppState | 'login'): void {
     removeInstallNudge();
     app.appendChild(renderLogin());
   } else {
-    app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid, mountCircle));
+    app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid, mountCircle, onPostCountRefresh));
     // Show only one bottom banner — both are fixed bottom-0 and would overlap.
     const installShown = renderInstallNudge();
     if (!installShown) void renderNotificationNudge();

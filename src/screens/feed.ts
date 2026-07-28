@@ -6,7 +6,7 @@ import { fetchMeenowFeed, type FeedPost } from '../api/pixelfed';
 import { fetchPendingRequestCount } from '../api/social';
 import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime, formatCountdown, formatRelativeTime } from '../timer';
 
-export function renderFeed(onRequestCapture: () => void, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenGrid: () => void, onOpenCircle: () => void): HTMLElement {
+export function renderFeed(onRequestCapture: () => void, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenGrid: () => void, onOpenCircle: () => void, onPostCountChange: (count: number) => void): HTMLElement {
   const auth = getAuthState();
   const el = document.createElement('div');
   el.className = 'min-h-dvh flex flex-col bg-cream';
@@ -81,8 +81,8 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
   header.querySelector('#btn-open-circle')?.addEventListener('click', onOpenCircle);
 
   if (auth) {
-    setupRefresh(el, body, content, auth, postCount, onOpenPost);
-    loadFeed(content, auth, postCount, onOpenPost);
+    setupRefresh(el, body, content, auth, postCount, onOpenPost, onPostCountChange);
+    loadFeed(content, auth, postCount, onOpenPost, onPostCountChange);
     // Mark the circle icon when follow requests are waiting.
     void fetchPendingRequestCount(auth).then(count => {
       const circleBtn = header.querySelector('#btn-open-circle');
@@ -99,7 +99,7 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
 // Pull-to-refresh + foreground refresh. iOS standalone PWAs have no native
 // pull-to-refresh, and Android's is disabled via overscroll-behavior (style.css),
 // so this custom gesture is the single source of truth on both platforms.
-function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void): void {
+function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void, onPostCountChange: (count: number) => void): void {
   const PULL_THRESHOLD = 70; // px of (damped) pull needed to trigger a refresh
   const PULL_MAX = 110;
   let refreshing = false;
@@ -143,7 +143,7 @@ function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, 
     body.style.transition = 'transform 0.2s ease';
     body.style.transform = 'translateY(0)';
     try {
-      await loadFeed(content, auth, postCount, onOpenPost, true);
+      await loadFeed(content, auth, postCount, onOpenPost, onPostCountChange, true);
     } finally {
       resetPull();
       refreshing = false;
@@ -197,7 +197,7 @@ function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, 
 // `silent` skips the full-screen spinner and keeps the existing cards on screen
 // (used by pull-to-refresh and foreground refresh, where the loading cue lives
 // elsewhere); on failure it leaves the current feed untouched.
-async function loadFeed(container: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void, silent = false): Promise<void> {
+async function loadFeed(container: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void, onPostCountChange: (count: number) => void, silent = false): Promise<void> {
 
   if (!silent) {
     container.innerHTML = `
@@ -218,8 +218,16 @@ async function loadFeed(container: HTMLElement, auth: AuthState, postCount: numb
         <button id="btn-feed-retry" class="text-sm text-gold underline underline-offset-2">Retry</button>
       </div>
     `;
-    container.querySelector('#btn-feed-retry')?.addEventListener('click', () => loadFeed(container, auth, postCount, onOpenPost));
+    container.querySelector('#btn-feed-retry')?.addEventListener('click', () => loadFeed(container, auth, postCount, onOpenPost, onPostCountChange));
     return;
+  }
+
+  // Reconcile the header count with the fresh timeline data: the count fetched
+  // at page load can be stale (e.g. that fetch failed), which would leave the
+  // header at 0/N and the feed blurred even though the user has posted.
+  if (auth.accountId) {
+    onPostCountChange(posts.filter(p => p.account.id === auth.accountId).length);
+    if (!container.isConnected) return; // count change remounted the feed
   }
 
   container.innerHTML = '';
