@@ -2,11 +2,11 @@
 import { SLEEPING_CAT, SPEECH_BUBBLE_ICON, GRID_ICON, PEOPLE_ICON } from '../icons';
 import { clearAuth, getAuthState, type AuthState } from '../api/auth';
 import { MAX_POSTS_PER_TRIGGER } from '../state';
-import { fetchMeenowFeed, type FeedPost } from '../api/pixelfed';
+import { fetchMeenowFeed, fetchTodayPostCount, type FeedPost } from '../api/pixelfed';
 import { fetchPendingRequestCount } from '../api/social';
 import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime, formatCountdown, formatRelativeTime } from '../timer';
 
-export function renderFeed(onRequestCapture: () => void, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenGrid: () => void, onOpenCircle: () => void): HTMLElement {
+export function renderFeed(onRequestCapture: () => void, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenGrid: () => void, onOpenCircle: () => void, onCountChange?: (count: number) => void): HTMLElement {
   const auth = getAuthState();
   const el = document.createElement('div');
   el.className = 'min-h-dvh flex flex-col bg-cream';
@@ -81,8 +81,8 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
   header.querySelector('#btn-open-circle')?.addEventListener('click', onOpenCircle);
 
   if (auth) {
-    setupRefresh(el, body, content, auth, postCount, onOpenPost);
-    loadFeed(content, auth, postCount, onOpenPost);
+    setupRefresh(el, body, content, auth, postCount, onOpenPost, onCountChange);
+    loadFeed(content, auth, postCount, onOpenPost, onCountChange);
     // Mark the circle icon when follow requests are waiting.
     void fetchPendingRequestCount(auth).then(count => {
       const circleBtn = header.querySelector('#btn-open-circle');
@@ -99,7 +99,7 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
 // Pull-to-refresh + foreground refresh. iOS standalone PWAs have no native
 // pull-to-refresh, and Android's is disabled via overscroll-behavior (style.css),
 // so this custom gesture is the single source of truth on both platforms.
-function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void): void {
+function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void, onCountChange?: (count: number) => void): void {
   const PULL_THRESHOLD = 70; // px of (damped) pull needed to trigger a refresh
   const PULL_MAX = 110;
   let refreshing = false;
@@ -143,7 +143,7 @@ function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, 
     body.style.transition = 'transform 0.2s ease';
     body.style.transform = 'translateY(0)';
     try {
-      await loadFeed(content, auth, postCount, onOpenPost, true);
+      await loadFeed(content, auth, postCount, onOpenPost, onCountChange, true);
     } finally {
       resetPull();
       refreshing = false;
@@ -197,7 +197,7 @@ function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, 
 // `silent` skips the full-screen spinner and keeps the existing cards on screen
 // (used by pull-to-refresh and foreground refresh, where the loading cue lives
 // elsewhere); on failure it leaves the current feed untouched.
-async function loadFeed(container: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void, silent = false): Promise<void> {
+async function loadFeed(container: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void, onCountChange?: (count: number) => void, silent = false): Promise<void> {
 
   if (!silent) {
     container.innerHTML = `
@@ -218,9 +218,17 @@ async function loadFeed(container: HTMLElement, auth: AuthState, postCount: numb
         <button id="btn-feed-retry" class="text-sm text-gold underline underline-offset-2">Retry</button>
       </div>
     `;
-    container.querySelector('#btn-feed-retry')?.addEventListener('click', () => loadFeed(container, auth, postCount, onOpenPost));
+    container.querySelector('#btn-feed-retry')?.addEventListener('click', () => loadFeed(container, auth, postCount, onOpenPost, onCountChange));
     return;
   }
+
+  // Re-derive the period post count from the just-refreshed timeline cache, so a
+  // post the initial page-load fetch missed (timeline lag or a transient error)
+  // corrects the header instead of drifting from what the feed shows.
+  void fetchTodayPostCount(auth).then(count => {
+    const clamped = Math.min(count, MAX_POSTS_PER_TRIGGER);
+    if (clamped !== postCount) onCountChange?.(clamped);
+  });
 
   container.innerHTML = '';
 

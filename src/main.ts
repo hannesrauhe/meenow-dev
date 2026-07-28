@@ -30,6 +30,8 @@ let tickId: number | null = null;
 
 // Post count for the current trigger period. Fetched from the server on every
 // page load so multi-device state is always up-to-date — no localStorage cache.
+// Re-derived on every feed load via onPeriodCountChange so it stays in sync
+// with what the refreshed feed shows.
 let periodPostCount = 0;
 
 // Tracks the boundary of the last known trigger period so the tick loop can
@@ -163,6 +165,17 @@ async function applyUpdate(
 const updateSW = registerSW({
   onNeedRefresh() { showUpdateBanner(updateSW); },
 });
+
+// Feed loads re-derive the count from the refreshed timeline (see loadFeed); a
+// changed value means the page-load fetch was stale (timeline lag, transient
+// error) or a post was deleted on Pixelfed directly — sync and re-render.
+function onPeriodCountChange(count: number): void {
+  if (periodPostCount === 0 && count > 0) {
+    void idbSet(IDB_KEYS.postedTriggerMs, getLastTriggerTime().getTime());
+  }
+  periodPostCount = count;
+  if (activeScreen === 'feed') mount('feed');
+}
 
 function onPosted(): void {
   if (periodPostCount === 0) {
@@ -334,7 +347,7 @@ function mount(screen: AppState | 'login'): void {
     removeInstallNudge();
     app.appendChild(renderLogin());
   } else {
-    app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid, mountCircle));
+    app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid, mountCircle, onPeriodCountChange));
     // Show only one bottom banner — both are fixed bottom-0 and would overlap.
     const installShown = renderInstallNudge();
     if (!installShown) void renderNotificationNudge();
