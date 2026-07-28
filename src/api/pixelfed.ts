@@ -169,6 +169,11 @@ export async function postMeenow(
   if (_homeCache) {
     _homeCache.statuses = [statusData, ..._homeCache.statuses];
     if (isNewerId(statusData.id, _homeCache.newestId)) _homeCache.newestId = statusData.id;
+  } else {
+    // No cache yet (e.g. posting before the first feed fetch resolved): seed one
+    // so the post shows immediately. newestId stays empty so the next fetch is a
+    // full one that backfills friends' posts; fetchedAt 0 makes it fire at once.
+    _homeCache = { statuses: [statusData], newestId: '', fetchedAt: 0 };
   }
   return statusData.url;
 }
@@ -198,9 +203,11 @@ interface HomeCache { statuses: MastodonStatus[]; newestId: string; fetchedAt: n
 let _homeCache: HomeCache | null = null;
 let _homePending: Promise<MastodonStatus[]> | null = null;
 
-function fetchHomeTimeline(auth: AuthState): Promise<MastodonStatus[]> {
+// `force` skips the TTL short-circuit (explicit user refresh); the fetch itself
+// stays incremental via since_id and concurrent callers still share _homePending.
+function fetchHomeTimeline(auth: AuthState, force = false): Promise<MastodonStatus[]> {
   if (_homePending) return _homePending;
-  if (_homeCache && Date.now() - _homeCache.fetchedAt < HOME_CACHE_TTL_MS) {
+  if (!force && _homeCache && Date.now() - _homeCache.fetchedAt < HOME_CACHE_TTL_MS) {
     return Promise.resolve(_homeCache.statuses);
   }
 
@@ -315,9 +322,9 @@ function triggerArchive(auth: AuthState, statuses: MastodonStatus[]): void {
   );
 }
 
-export async function fetchMeenowFeed(auth: AuthState): Promise<FeedPost[]> {
+export async function fetchMeenowFeed(auth: AuthState, force = false): Promise<FeedPost[]> {
   const cutoff = getLastTriggerTime().getTime();
-  const statuses = await fetchHomeTimeline(auth);
+  const statuses = await fetchHomeTimeline(auth, force);
   triggerArchive(auth, statuses);
   const sorted = statuses
     .filter(s =>
