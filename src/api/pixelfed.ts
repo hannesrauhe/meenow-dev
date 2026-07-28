@@ -72,12 +72,37 @@ interface PostContext {
 
 // --- Upload / post ---
 
+const RETRY_DELAYS_MS = [1000, 2000];
+
+// Retries transport-level failures (TypeError: the request never reached the
+// server) with backoff, and a 5xx response once. 4xx returns immediately.
+async function fetchRetry(url: string, init: RequestInit): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetch(url, init);
+      if (res.status < 500 || attempt >= 1) return res;
+    } catch (err) {
+      if (!(err instanceof TypeError) || attempt >= RETRY_DELAYS_MS.length) throw err;
+    }
+    await new Promise(r => setTimeout(r, RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)]));
+  }
+}
+
+// Upload progress carried across manual retries: media already uploaded are
+// not re-uploaded, and the idempotency key prevents a duplicate status.
+export interface PostProgress {
+  compositeId?: string;
+  backId?: string;
+  frontId?: string;
+  idemKey?: string;
+}
+
 async function uploadOne(auth: AuthState, blob: Blob, description: string): Promise<string> {
   const form = new FormData();
   form.append('file', blob, 'meenow.jpg');
   form.append('description', description);
 
-  const res = await fetch(`https://${auth.instance}/api/v1/media`, {
+  const res = await fetchRetry(`https://${auth.instance}/api/v1/media`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${auth.accessToken}` },
     body: form,
@@ -89,7 +114,7 @@ async function uploadOne(auth: AuthState, blob: Blob, description: string): Prom
 
   for (let i = 0; i < 20; i++) {
     await new Promise(r => setTimeout(r, 1500));
-    const poll = await fetch(`https://${auth.instance}/api/v1/media/${media.id}`, {
+    const poll = await fetchRetry(`https://${auth.instance}/api/v1/media/${media.id}`, {
       headers: { Authorization: `Bearer ${auth.accessToken}` },
     });
     if (!poll.ok) throw new Error(`Media poll failed (${poll.status})`);
@@ -105,24 +130,27 @@ export async function postMeenow(
   backPhoto: Blob,
   frontPhoto: Blob,
   statusText?: string,
+  progress: PostProgress = {},
 ): Promise<string> {
   // Upload composite first so it gets the lowest attachment ID and appears first in the gallery
-  const compositeId = await uploadOne(auth, composite, 'meenow — daily photo');
-  const [backId, frontId] = await Promise.all([
-    uploadOne(auth, backPhoto, 'meenow — surroundings'),
-    uploadOne(auth, frontPhoto, 'meenow — selfie'),
+  progress.compositeId ??= await uploadOne(auth, composite, 'meenow — daily photo');
+  [progress.backId, progress.frontId] = await Promise.all([
+    progress.backId ?? uploadOne(auth, backPhoto, 'meenow — surroundings'),
+    progress.frontId ?? uploadOne(auth, frontPhoto, 'meenow — selfie'),
   ]);
 
+  progress.idemKey ??= crypto.randomUUID();
   const status = statusText ? `${statusText}\n\n#meenowApp` : '#meenowApp';
-  const res = await fetch(`https://${auth.instance}/api/v1/statuses`, {
+  const res = await fetchRetry(`https://${auth.instance}/api/v1/statuses`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${auth.accessToken}`,
       'Content-Type': 'application/json',
+      'Idempotency-Key': progress.idemKey,
     },
     body: JSON.stringify({
       status,
-      media_ids: [compositeId, backId, frontId],
+      media_ids: [progress.compositeId, progress.backId, progress.frontId],
       visibility: 'private',
     }),
   });
