@@ -46,6 +46,20 @@ export const TRASH_ICON = `
 </svg>
 `;
 
+export const SAVE_ICON = `
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+  <polyline points="7 10 12 15 17 10"/>
+  <line x1="12" y1="15" x2="12" y2="3"/>
+</svg>
+`;
+
+export const CHECK_ICON = `
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <polyline points="20 6 9 17 4 12"/>
+</svg>
+`;
+
 export const SLEEPING_CAT = `
 <svg viewBox="0 0 120 80" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
   <ellipse cx="60" cy="58" rx="42" ry="16" fill="currentColor" opacity="0.12"/>

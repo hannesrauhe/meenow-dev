@@ -88,6 +88,14 @@ Any combination is valid (caption only, location only, both, or neither). The `#
 
 **Display**: caption appears as plain text below the photo; location appears as the same gold rounded-pill (`text-gold border border-gold/30 rounded-full`) used in the capture preview. Both are rendered in the feed card and in the post detail screen.
 
+## Save to device: local photo archive
+
+The capture preview has a "Save to device" overlay button (top-right on the photo) so users can keep the stitched JPEG on their phone — a personal archive independent of the app and of Pixelfed. A web app cannot write to the gallery silently, so saving is always an explicit tap: `saveImage` in `src/share.ts` tries `navigator.share({ files })` (the only route into iOS Photos from a PWA; requires transient user activation) and falls back to an object-URL anchor download (`meenow-YYYY-MM-DD.jpg`); a cancelled share sheet (`AbortError`) is silent and does not trigger the fallback.
+
+Canvas re-encoding strips all metadata, so `insertExif` in `src/exif.ts` (hand-built APP1/TIFF segment, no dependency) adds `DateTimeOriginal` + timezone offset and — when the user tapped "Add location" — GPS coordinates to the **saved copy only, never to the uploaded blobs**: the app deliberately shares location as city-level text, and embedding precise GPS in uploads would leak coordinates on instances that don't strip EXIF. The EXIF-tagged blob is pre-computed when the preview mounts and whenever the location changes, so the save tap reaches `navigator.share` without an intervening await (Safari would otherwise drop the transient activation).
+
+The flow works fully offline (capture, stitch, save are local; the feed header renders "+ Post" before any network call): when the Nominatim reverse-geocode is unreachable, the location pill falls back to rounded raw coordinates from the (offline-capable) geolocation fix, which still feed the EXIF GPS tags.
+
 ## Grid screen: My Photos
 
 `src/screens/grid.ts` renders a personal photo archive reachable via the grid icon button in the feed header.

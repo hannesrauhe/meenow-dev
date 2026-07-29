@@ -2,7 +2,9 @@
 import { MAX_POSTS_PER_TRIGGER, isIOS, isPwaInstalled } from '../state';
 import { getAuthState } from '../api/auth';
 import { postMeenow, type PostProgress } from '../api/pixelfed';
-import { CAT_EARS_SHUTTER } from '../icons';
+import { CAT_EARS_SHUTTER, SAVE_ICON, CHECK_ICON } from '../icons';
+import { saveImage, dateFilename } from '../share';
+import { insertExif } from '../exif';
 
 const CAMERA_SWITCH_DELAY_MS = 600; // browser needs time to release back camera before front opens
 
@@ -182,6 +184,21 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
   let statusText = '';
   let locationText = '';
   let progress: PostProgress = {};
+  let captureDate = new Date();
+  let coords: { lat: number; lon: number } | null = null;
+  let saveBlob: Blob | null = null;
+
+  // Pre-compute the EXIF-tagged copy for "Save to device" so the save tap can
+  // call navigator.share without a preceding await (Safari drops the transient
+  // user activation otherwise). EXIF goes only into the saved copy, never into
+  // the upload: the app deliberately shares location as city-level text only.
+  function refreshSaveBlob(): void {
+    const source = compositeBlob;
+    if (!source) { saveBlob = null; return; }
+    void insertExif(source, { date: captureDate, ...(coords ?? {}) }).then(b => {
+      if (compositeBlob === source) saveBlob = b;
+    });
+  }
 
   function show(step: Step, message = '', detail = ''): void {
     stopAllStreams();
@@ -261,6 +278,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
   }
 
   async function captureBack(video: HTMLVideoElement): Promise<void> {
+    captureDate = new Date();
     backBlob = await captureFrame(video).catch(() => null);
     if (!backBlob) { show('error', 'Failed to capture.'); return; }
     stopAllStreams();
@@ -313,6 +331,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     compositeBlob = await stitchPhotos(backBlob!, frontBlob).catch(() => null);
     if (!compositeBlob) { show('error', 'Failed to stitch photos.'); return; }
     progress = {};
+    refreshSaveBlob();
     show('preview');
   }
 
@@ -321,13 +340,21 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     d.className = 'w-full h-full flex flex-col';
 
     const imgWrapper = document.createElement('div');
-    imgWrapper.className = 'flex-1 min-h-0 flex items-center justify-center overflow-hidden';
+    imgWrapper.className = 'relative flex-1 min-h-0 flex items-center justify-center overflow-hidden';
     previewUrl = URL.createObjectURL(compositeBlob!);
     const img = document.createElement('img');
     img.src = previewUrl;
     img.className = 'max-w-full max-h-full object-contain';
     img.alt = 'Your meenow photo';
     imgWrapper.appendChild(img);
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'absolute top-[max(1rem,calc(env(safe-area-inset-top,0px)+0.5rem))] right-4 w-10 h-10 flex items-center justify-center rounded-full bg-black/50 text-white [&>svg]:size-5 active:scale-95';
+    saveBtn.setAttribute('aria-label', 'Save to device');
+    saveBtn.innerHTML = SAVE_ICON;
+    saveBtn.addEventListener('click', () => void handleSave(saveBtn));
+    imgWrapper.appendChild(saveBtn);
+
     d.appendChild(imgWrapper);
 
     const bar = document.createElement('div');
@@ -351,7 +378,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
         locBtn.className = 'text-xs text-gold border border-gold/30 rounded-full px-3 py-1.5 max-w-full truncate';
         locBtn.textContent = locationText;
         locBtn.title = 'Tap to clear location';
-        locBtn.onclick = () => { locationText = ''; renderLocBtn(); };
+        locBtn.onclick = () => { locationText = ''; coords = null; refreshSaveBlob(); renderLocBtn(); };
       } else {
         locBtn.className = 'text-xs text-ink/40 hover:text-gold transition-colors border border-ink/15 rounded-full px-3 py-1.5';
         locBtn.textContent = 'Add location';
@@ -364,22 +391,30 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
       locBtn.textContent = 'Getting location…';
       locBtn.disabled = true;
       locBtn.onclick = null;
+      coords = null;
       try {
         const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
           navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10_000 })
         );
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${pos.coords.latitude}&lon=${pos.coords.longitude}&zoom=10`,
-          { headers: { 'Accept-Language': 'en' } }
-        );
-        if (!res.ok) throw new Error('Geocoding failed');
-        const data = await res.json() as { address?: { city?: string; town?: string; village?: string; country?: string } };
-        const city = data.address?.city ?? data.address?.town ?? data.address?.village;
-        const country = data.address?.country;
-        locationText = `📍 ${[city, country].filter(Boolean).join(', ')}`;
+        coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${coords.lat}&lon=${coords.lon}&zoom=10`,
+            { headers: { 'Accept-Language': 'en' } }
+          );
+          if (!res.ok) throw new Error('Geocoding failed');
+          const data = await res.json() as { address?: { city?: string; town?: string; village?: string; country?: string } };
+          const city = data.address?.city ?? data.address?.town ?? data.address?.village;
+          const country = data.address?.country;
+          locationText = `📍 ${[city, country].filter(Boolean).join(', ')}`;
+        } catch {
+          // Offline or geocoder unreachable: keep the fix as raw coordinates.
+          locationText = `📍 ${coords.lat.toFixed(2)}, ${coords.lon.toFixed(2)}`;
+        }
       } catch {
         locationText = '';
       }
+      refreshSaveBlob();
       locBtn.disabled = false;
       renderLocBtn();
     }
@@ -395,7 +430,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     retakeBtn.className = 'flex-1 border border-ink/20 text-ink rounded-full py-3 text-sm font-medium';
     retakeBtn.textContent = 'Retake';
     retakeBtn.addEventListener('click', () => {
-      backBlob = null; frontBlob = null; compositeBlob = null;
+      backBlob = null; frontBlob = null; compositeBlob = null; saveBlob = null;
       progress = {};
       show('start'); // show() revokes previewUrl
     });
@@ -430,6 +465,20 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
       } else {
         show('error', err instanceof Error ? err.message : 'Upload failed.');
       }
+    }
+  }
+
+  async function handleSave(btn: HTMLButtonElement): Promise<void> {
+    const blob = saveBlob ?? compositeBlob;
+    if (!blob) return;
+    btn.disabled = true;
+    const result = await saveImage(blob, dateFilename('meenow', captureDate));
+    if ((result === 'shared' || result === 'downloaded') && btn.isConnected) {
+      btn.innerHTML = CHECK_ICON;
+      setTimeout(() => { btn.innerHTML = SAVE_ICON; btn.disabled = false; }, 1500);
+    } else {
+      btn.innerHTML = SAVE_ICON;
+      btn.disabled = false;
     }
   }
 
