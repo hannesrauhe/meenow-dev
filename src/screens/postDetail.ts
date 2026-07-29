@@ -9,6 +9,7 @@ export function renderPostDetail(
   auth: AuthState,
   onBack: () => void,
   onDelete?: () => Promise<void>,
+  onOpenPeer?: (account: FeedPost['account']) => void,
 ): HTMLElement {
   const root = document.createElement('div');
   root.id = 'screen-post-detail';
@@ -71,6 +72,10 @@ export function renderPostDetail(
   info.appendChild(metaEl);
 
   authorRow.appendChild(info);
+  if (onOpenPeer && post.account.id !== auth.accountId) {
+    authorRow.classList.add('cursor-pointer');
+    authorRow.addEventListener('click', () => onOpenPeer(post.account));
+  }
   scrollArea.appendChild(authorRow);
 
   scrollArea.appendChild(makePhotoSwiper(post));

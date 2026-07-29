@@ -6,7 +6,7 @@ import { fetchMeenowFeed, type FeedPost } from '../api/pixelfed';
 import { fetchPendingRequestCount } from '../api/social';
 import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime, formatCountdown, formatRelativeTime } from '../timer';
 
-export function renderFeed(onRequestCapture: () => void, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenGrid: () => void, onOpenCircle: () => void, onPostCountChange: (count: number) => void): HTMLElement {
+export function renderFeed(onRequestCapture: () => void, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenGrid: () => void, onOpenCircle: () => void, onOpenPeer: (account: FeedPost['account']) => void, onPostCountChange: (count: number) => void): HTMLElement {
   const auth = getAuthState();
   const el = document.createElement('div');
   el.className = 'min-h-dvh flex flex-col bg-cream';
@@ -81,8 +81,8 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
   header.querySelector('#btn-open-circle')?.addEventListener('click', onOpenCircle);
 
   if (auth) {
-    setupRefresh(el, body, content, auth, postCount, onOpenPost, onPostCountChange);
-    loadFeed(content, auth, postCount, onOpenPost, onPostCountChange);
+    setupRefresh(el, body, content, auth, postCount, onOpenPost, onOpenPeer, onPostCountChange);
+    loadFeed(content, auth, postCount, onOpenPost, onOpenPeer, onPostCountChange);
     // Mark the circle icon when follow requests are waiting.
     void fetchPendingRequestCount(auth).then(count => {
       const circleBtn = header.querySelector('#btn-open-circle');
@@ -99,7 +99,7 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
 // Pull-to-refresh + foreground refresh. iOS standalone PWAs have no native
 // pull-to-refresh, and Android's is disabled via overscroll-behavior (style.css),
 // so this custom gesture is the single source of truth on both platforms.
-function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void, onPostCountChange: (count: number) => void): void {
+function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenPeer: (account: FeedPost['account']) => void, onPostCountChange: (count: number) => void): void {
   const PULL_THRESHOLD = 70; // px of (damped) pull needed to trigger a refresh
   const PULL_MAX = 110;
   let refreshing = false;
@@ -143,7 +143,7 @@ function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, 
     body.style.transition = 'transform 0.2s ease';
     body.style.transform = 'translateY(0)';
     try {
-      await loadFeed(content, auth, postCount, onOpenPost, onPostCountChange, true, true);
+      await loadFeed(content, auth, postCount, onOpenPost, onOpenPeer, onPostCountChange, true, true);
     } finally {
       resetPull();
       refreshing = false;
@@ -198,7 +198,7 @@ function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, 
 // (used by pull-to-refresh and foreground refresh, where the loading cue lives
 // elsewhere); on failure it leaves the current feed untouched.
 // `force` bypasses the home-timeline cache TTL (explicit user refresh).
-async function loadFeed(container: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void, onPostCountChange: (count: number) => void, silent = false, force = false): Promise<void> {
+async function loadFeed(container: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenPeer: (account: FeedPost['account']) => void, onPostCountChange: (count: number) => void, silent = false, force = false): Promise<void> {
 
   if (!silent) {
     container.innerHTML = `
@@ -219,7 +219,7 @@ async function loadFeed(container: HTMLElement, auth: AuthState, postCount: numb
         <button id="btn-feed-retry" class="text-sm text-gold underline underline-offset-2">Retry</button>
       </div>
     `;
-    container.querySelector('#btn-feed-retry')?.addEventListener('click', () => loadFeed(container, auth, postCount, onOpenPost, onPostCountChange));
+    container.querySelector('#btn-feed-retry')?.addEventListener('click', () => loadFeed(container, auth, postCount, onOpenPost, onOpenPeer, onPostCountChange));
     return;
   }
 
@@ -244,10 +244,10 @@ async function loadFeed(container: HTMLElement, auth: AuthState, postCount: numb
   }
 
   const unblurred = postCount > 0;
-  posts.forEach(post => container.appendChild(makePostCard(post, unblurred, onOpenPost)));
+  posts.forEach(post => container.appendChild(makePostCard(post, unblurred, auth, onOpenPost, onOpenPeer)));
 }
 
-function makePostCard(post: FeedPost, unblurred: boolean, onOpenPost: (post: FeedPost) => void): HTMLElement {
+function makePostCard(post: FeedPost, unblurred: boolean, auth: AuthState, onOpenPost: (post: FeedPost) => void, onOpenPeer: (account: FeedPost['account']) => void): HTMLElement {
   const card = document.createElement('article');
   card.className = 'border-b border-ink/8';
 
@@ -275,6 +275,10 @@ function makePostCard(post: FeedPost, unblurred: boolean, onOpenPost: (post: Fee
   info.appendChild(metaEl);
 
   header.appendChild(info);
+  if (post.account.id !== auth.accountId) {
+    header.classList.add('cursor-pointer');
+    header.addEventListener('click', () => onOpenPeer(post.account));
+  }
   card.appendChild(header);
 
   // Image wrapper
