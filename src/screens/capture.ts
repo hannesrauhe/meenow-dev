@@ -121,8 +121,11 @@ async function stitchPhotos(back: Blob, front: Blob): Promise<Blob> {
 
   ctx.drawImage(bi, 0, 0, W, H);
 
-  const insetW = Math.round(W * 0.35);
-  const insetH = Math.round(insetW * fi.naturalHeight / fi.naturalWidth);
+  // Fit the selfie into 35% of both canvas dimensions so a portrait selfie
+  // cannot overflow a landscape main photo (and vice versa).
+  const scale = Math.min((W * 0.35) / fi.naturalWidth, (H * 0.35) / fi.naturalHeight);
+  const insetW = Math.round(fi.naturalWidth * scale);
+  const insetH = Math.round(fi.naturalHeight * scale);
   const pad = Math.round(W * 0.03);
   const r = Math.round(insetW * 0.08);
 
