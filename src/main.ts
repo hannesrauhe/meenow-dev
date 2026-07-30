@@ -4,10 +4,10 @@ declare const __GIT_HASH__: string;
 import './style.css';
 import { getAuthState, handleOAuthCallback, dropTokenIfScopesStale } from './api/auth';
 import { getLastTriggerTime, type AppState } from './timer';
-import { MAX_POSTS_PER_TRIGGER, getPendingAdd, setPendingAdd, clearPendingAdd } from './state';
+import { MAX_POSTS_PER_TRIGGER, getPendingAdd, setPendingAdd, clearPendingAdd, clearPwaSubbed } from './state';
 import { fetchTodayPostCount, deletePost, removePostFromCache } from './api/pixelfed';
 import type { Connection } from './api/social';
-import { renderCapture } from './screens/capture';
+import { renderCapture, stopCaptureStreams } from './screens/capture';
 import { renderFeed } from './screens/feed';
 import { renderGrid } from './screens/grid';
 import { renderCircle } from './screens/circle';
@@ -172,6 +172,19 @@ function onPosted(): void {
   clearAppBadge();
 }
 
+// Called by the feed with a fresh own-post count after every successful feed
+// load, so a stale count (e.g. the page-load fetch failed) is corrected on
+// pull-to-refresh / foreground refresh instead of persisting until reload.
+function onPostCountRefresh(count: number): void {
+  const clamped = Math.min(count, MAX_POSTS_PER_TRIGGER);
+  if (clamped === periodPostCount) return;
+  if (periodPostCount === 0 && clamped > 0) {
+    void idbSet(IDB_KEYS.postedTriggerMs, getLastTriggerTime().getTime());
+  }
+  periodPostCount = clamped;
+  if (activeScreen === 'feed') mount('feed');
+}
+
 function mountCapture(): void {
   activeScreen = 'capturing';
   app.innerHTML = '';
@@ -180,14 +193,23 @@ function mountCapture(): void {
 
   history.pushState({ screen: 'capturing' }, '');
 
-  const onPopState = () => { activeScreen = null; tick(); };
+  // Stop the camera here too: hardware back exits without going through the
+  // capture screen's own cancel handler.
+  const onPopState = () => { stopCaptureStreams(); activeScreen = null; tick(); };
   window.addEventListener('popstate', onPopState, { once: true });
 
-  app.appendChild(renderCapture(periodPostCount, onPosted, () => {
-    history.back();
-  }));
+  const close = () => { history.back(); };
+  app.appendChild(renderCapture(periodPostCount, onPosted, close, close));
 }
 
+// Converts a post author into the Connection shape the peer screen expects.
+function toPeer(a: FeedPost['account']): Connection {
+  return { id: a.id, displayName: a.displayName, username: a.username, acct: a.acct, avatarUrl: a.avatarUrl, url: a.url };
+}
+
+// Post detail with nested peer navigation (same pattern as mountGrid →
+// mountPostDetail): hardware back from the author's peer screen returns to the
+// detail view, not the screen below it.
 function mountPostDetail(post: FeedPost, onClose?: () => void): void {
   const auth = getAuthState();
   if (!auth) return;
@@ -199,8 +221,11 @@ function mountPostDetail(post: FeedPost, onClose?: () => void): void {
   history.pushState({ screen: 'post_detail' }, '');
 
   const returnTo = onClose ?? tick;
-  const onPopState = () => { activeScreen = null; returnTo(); };
-  window.addEventListener('popstate', onPopState, { once: true });
+  let popHandler: (() => void) | null = null;
+  const installPop = (): void => {
+    popHandler = () => { popHandler = null; activeScreen = null; returnTo(); };
+    window.addEventListener('popstate', popHandler, { once: true });
+  };
 
   const onDeletePost = async (): Promise<void> => {
     await deletePost(auth, post.id);
@@ -208,13 +233,27 @@ function mountPostDetail(post: FeedPost, onClose?: () => void): void {
     history.back();
   };
 
+  const openPeer = (a: FeedPost['account']): void => {
+    if (popHandler) { window.removeEventListener('popstate', popHandler); popHandler = null; }
+    mountPeerConnections(toPeer(a), () => {
+      activeScreen = 'post_detail';
+      app.innerHTML = '';
+      installPop();
+      app.appendChild(renderDetail());
+    });
+  };
+
+  const renderDetail = (): HTMLElement => renderPostDetail(post, auth, () => {
+    history.back();
+  }, onDeletePost, openPeer);
+
+  installPop();
+
   let el: HTMLElement;
   try {
-    el = renderPostDetail(post, auth, () => {
-      history.back();
-    }, onDeletePost);
+    el = renderDetail();
   } catch {
-    window.removeEventListener('popstate', onPopState);
+    if (popHandler) { window.removeEventListener('popstate', popHandler); popHandler = null; }
     history.back();
     activeScreen = null;
     return;
@@ -334,7 +373,7 @@ function mount(screen: AppState | 'login'): void {
     removeInstallNudge();
     app.appendChild(renderLogin());
   } else {
-    app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid, mountCircle));
+    app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid, mountCircle, a => mountPeerConnections(toPeer(a)), onPostCountRefresh));
     // Show only one bottom banner — both are fixed bottom-0 and would overlap.
     const installShown = renderInstallNudge();
     if (!installShown) void renderNotificationNudge();
@@ -382,7 +421,9 @@ async function init(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
   const code = params.get('code');
   const add = params.get('add');
-  if (code || add) {
+  // Set by the daily-reminder notification tap (issue #56) to open capture.
+  const action = params.get('action');
+  if (code || add || action) {
     history.replaceState({}, '', window.location.pathname);
   }
   if (code) {
@@ -400,6 +441,13 @@ async function init(): Promise<void> {
   // can't perform relationship writes, so drop them and let the login screen
   // prompt a single re-authentication with the current scopes.
   dropTokenIfScopesStale();
+
+  // A (re)install invalidates the PWA-routing flag: the surviving push
+  // subscription belongs to the previous install's context (localStorage
+  // outlives the WebAPK, so the flag would otherwise stay stale and Chrome
+  // keeps showing the notifications), so the first standalone launch after
+  // install must re-subscribe.
+  window.addEventListener('appinstalled', clearPwaSubbed);
 
   // Re-subscribe if the VAPID key was rotated or if the subscription was created
   // in a browser tab and needs to be re-created in the installed PWA context.
@@ -443,6 +491,23 @@ async function init(): Promise<void> {
   if (pendingAdd && getAuthState()) {
     clearPendingAdd();
     mountConnectLanding(pendingAdd);
+  }
+
+  // A daily-reminder notification tap on a cold start lands here via
+  // ?action=capture; open capture on top of the now-mounted feed (issue #56).
+  if (action === 'capture' && getAuthState()) {
+    mountCapture();
+  }
+
+  // Warm case: the app was already open when the notification was tapped, so the
+  // service worker focuses the window and posts the intent instead.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (e: MessageEvent) => {
+      if (e.data?.type === 'notification-action' && e.data.action === 'capture'
+          && getAuthState() && activeScreen !== 'capturing') {
+        mountCapture();
+      }
+    });
   }
 }
 

@@ -1,8 +1,10 @@
 // Capture screen: dual-camera photo capture flow (back camera then selfie), composite stitching, preview with optional caption/location, and post submission.
 import { MAX_POSTS_PER_TRIGGER, isIOS, isPwaInstalled } from '../state';
 import { getAuthState } from '../api/auth';
-import { postMeenow } from '../api/pixelfed';
-import { CAT_EARS_SHUTTER } from '../icons';
+import { postMeenow, type PostProgress } from '../api/pixelfed';
+import { CAT_EARS_SHUTTER, SAVE_ICON, CHECK_ICON } from '../icons';
+import { saveImage, dateFilename } from '../share';
+import { insertExif } from '../exif';
 
 const CAMERA_SWITCH_DELAY_MS = 600; // browser needs time to release back camera before front opens
 
@@ -10,7 +12,7 @@ type Step = 'start' | 'back' | 'switching' | 'front' | 'preview' | 'uploading' |
 
 let activeStreams: MediaStream[] = [];
 
-function stopAllStreams(): void {
+export function stopCaptureStreams(): void {
   activeStreams.forEach(s => s.getTracks().forEach(t => t.stop()));
   activeStreams = [];
 }
@@ -20,7 +22,7 @@ async function openCamera(
   facingMode: 'environment' | 'user',
 ): Promise<MediaStream> {
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: { ideal: facingMode } },
+    video: { facingMode: { ideal: facingMode }, width: { ideal: 3840 }, height: { ideal: 2160 } },
     audio: false,
   });
   activeStreams.push(stream);
@@ -52,26 +54,40 @@ function applyViewfinderTransform(video: HTMLVideoElement): void {
   video.style.transform = `translate(-50%, -50%) rotate(${deg}deg)`;
 }
 
-async function captureFrame(video: HTMLVideoElement): Promise<Blob> {
-  const track = video.srcObject instanceof MediaStream
-    ? video.srcObject.getVideoTracks()[0]
-    : undefined;
-
-  // Use ImageCapture API where available — returns EXIF-correct JPEG without canvas.
-  // Guard: on iPadOS Safari takePhoto() can silently return a near-empty black image
-  // instead of throwing, so reject blobs below 2 KB and fall through to canvas.
-  if (track && 'ImageCapture' in window) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ic = new (window as any).ImageCapture(track) as { takePhoto(): Promise<Blob> };
-      const blob = await ic.takePhoto();
-      if (blob.size > 2048) return blob;
-    } catch {
-      // fall through to canvas
-    }
+// Thumb-height shutter anchor (issue #72): bottom-center in portrait; in
+// landscape the browser rotates the layout, so anchor to the side edge the
+// bottom rotated to (landscape-primary → right, landscape-secondary → left)
+// and the button stays physically under the thumb.
+function shutterPositionClasses(): string {
+  const type = screen.orientation?.type ?? '';
+  if (type === 'landscape-secondary') {
+    return 'absolute left-[max(3rem,calc(env(safe-area-inset-left,0px)+1rem))] top-1/2 -translate-y-1/2';
   }
+  if (type.startsWith('landscape')) {
+    return 'absolute right-[max(3rem,calc(env(safe-area-inset-right,0px)+1rem))] top-1/2 -translate-y-1/2';
+  }
+  return 'absolute bottom-[max(3rem,calc(env(safe-area-inset-bottom,0px)+1rem))] left-1/2 -translate-x-1/2';
+}
 
-  // Canvas fallback: correct orientation using actual device angle at capture time
+// Applies the orientation-aware anchor and keeps it updated while the button
+// is mounted; the listener removes itself once the button leaves the DOM
+// (same self-cleanup pattern as the feed-header countdown).
+function positionShutter(btn: HTMLElement, baseClasses: string): void {
+  const apply = () => { btn.className = `${shutterPositionClasses()} ${baseClasses}`; };
+  apply();
+  const target: EventTarget = screen.orientation ?? window;
+  const event = screen.orientation ? 'change' : 'orientationchange';
+  const onChange = () => {
+    if (!btn.isConnected) { target.removeEventListener(event, onChange); return; }
+    apply();
+  };
+  target.addEventListener(event, onChange);
+}
+
+// Grab the current preview frame so the photo matches the viewfinder exactly —
+// no still-pipeline lag or AE/AWB shift (issue #76). Orientation is corrected
+// using the actual device angle at capture time.
+async function captureFrame(video: HTMLVideoElement): Promise<Blob> {
   const W = video.videoWidth;
   const H = video.videoHeight;
   const angle = screen.orientation?.angle ?? 0;
@@ -135,8 +151,11 @@ async function stitchPhotos(back: Blob, front: Blob): Promise<Blob> {
 
   ctx.drawImage(bi, 0, 0, W, H);
 
-  const insetW = Math.round(W * 0.35);
-  const insetH = Math.round(insetW * fi.naturalHeight / fi.naturalWidth);
+  // Fit the selfie into 35% of both canvas dimensions so a portrait selfie
+  // cannot overflow a landscape main photo (and vice versa).
+  const scale = Math.min((W * 0.35) / fi.naturalWidth, (H * 0.35) / fi.naturalHeight);
+  const insetW = Math.round(fi.naturalWidth * scale);
+  const insetH = Math.round(fi.naturalHeight * scale);
   const pad = Math.round(W * 0.03);
   const r = Math.round(insetW * 0.08);
 
@@ -171,22 +190,58 @@ function cameraErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Could not access camera.';
 }
 
-export function renderCapture(postCount: number, onPosted: () => void, onDone: () => void): HTMLElement {
+export function renderCapture(
+  postCount: number,
+  onPosted: () => void,
+  onDone: () => void,
+  onCancel: () => void,
+): HTMLElement {
   const root = document.createElement('div');
   root.id = 'screen-capture';
 
+  let closing = false;
   let backBlob: Blob | null = null;
   let frontBlob: Blob | null = null;
   let compositeBlob: Blob | null = null;
   let previewUrl: string | null = null;
   let statusText = '';
   let locationText = '';
+  let progress: PostProgress = {};
+  let captureDate = new Date();
+  let coords: { lat: number; lon: number; alt?: number } | null = null;
+  let saveBlob: Blob | null = null;
+  let saveBlobKey = '';
 
-  function show(step: Step, message = ''): void {
-    stopAllStreams();
+  function exifKey(): string {
+    return JSON.stringify([statusText.trim(), coords]);
+  }
+
+  // Pre-compute the EXIF-tagged copy for "Save to device" so the save tap can
+  // usually call navigator.share without a preceding await (Safari drops the
+  // transient user activation after long waits); a stale cache (caption edited
+  // since) is rebuilt in handleSave — milliseconds of in-memory work. EXIF goes
+  // only into the saved copy, never into the upload: the app deliberately
+  // shares location as city-level text only.
+  async function buildSaveBlob(): Promise<Blob | null> {
+    const source = compositeBlob;
+    if (!source) { saveBlob = null; return null; }
+    const key = exifKey();
+    const b = await insertExif(source, {
+      date: captureDate,
+      description: statusText.trim() || undefined,
+      ...(coords ?? {}),
+    });
+    if (compositeBlob === source) { saveBlob = b; saveBlobKey = key; }
+    return b;
+  }
+
+  function show(step: Step, message = '', detail = ''): void {
+    stopCaptureStreams();
     if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
     root.className = step === 'back' || step === 'front' || step === 'preview'
       ? 'fixed inset-0 bg-black'
+      // 'start' reserves bottom space for its absolutely anchored shutter (portrait only).
+      : step === 'start' ? 'screen gap-8 text-center relative pb-40 landscape:pb-0'
       : 'screen gap-8 text-center';
     root.innerHTML = '';
 
@@ -196,7 +251,28 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     else if (step === 'front') root.appendChild(makeFrontCamera());
     else if (step === 'preview') root.appendChild(makePreview());
     else if (step === 'uploading') root.appendChild(makeSpinner());
-    else root.appendChild(makeError(message));
+    else root.appendChild(makeError(message, detail));
+
+    // Exit route on every non-transient step — iOS has no hardware back
+    // button (issue #71). Hidden while switching (~600ms) and uploading.
+    if (step !== 'switching' && step !== 'uploading') root.appendChild(makeCancel(step));
+  }
+
+  function makeCancel(step: Step): HTMLElement {
+    const dark = step === 'back' || step === 'front' || step === 'preview';
+    const btn = document.createElement('button');
+    // fixed, not absolute: on cream steps root is not a positioned ancestor.
+    btn.className = `fixed top-[max(1rem,calc(env(safe-area-inset-top,0px)+0.5rem))] left-4 w-10 h-10 flex items-center justify-center rounded-full text-2xl leading-none ${
+      dark ? 'bg-black/50 text-white' : 'text-ink/40 hover:text-gold transition-colors'
+    }`;
+    btn.textContent = '×';
+    btn.setAttribute('aria-label', 'Cancel');
+    btn.addEventListener('click', () => {
+      closing = true;
+      stopCaptureStreams();
+      onCancel();
+    });
+    return btn;
   }
 
   function makeStart(): HTMLElement {
@@ -214,7 +290,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
       </div>
     `;
     const btn = document.createElement('button');
-    btn.className = 'w-20 h-20 text-ink hover:text-gold transition-colors active:scale-95';
+    positionShutter(btn, 'w-20 h-20 text-ink hover:text-gold transition-colors active:scale-95');
     btn.setAttribute('aria-label', 'Start camera');
     btn.innerHTML = CAT_EARS_SHUTTER;
     btn.addEventListener('click', () => show('back'));
@@ -247,7 +323,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     d.appendChild(hint);
 
     const btn = document.createElement('button');
-    btn.className = 'absolute bottom-[max(3rem,calc(env(safe-area-inset-bottom,0px)+1rem))] left-1/2 -translate-x-1/2 w-20 h-20 text-white drop-shadow-lg active:scale-95';
+    positionShutter(btn, 'w-20 h-20 text-white drop-shadow-lg active:scale-95');
     btn.setAttribute('aria-label', 'Capture');
     btn.innerHTML = CAT_EARS_SHUTTER;
     btn.addEventListener('click', () => captureBack(video));
@@ -259,12 +335,19 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     return d;
   }
 
+  function cancelled(): boolean {
+    return closing || !root.isConnected;
+  }
+
   async function captureBack(video: HTMLVideoElement): Promise<void> {
+    captureDate = new Date();
     backBlob = await captureFrame(video).catch(() => null);
+    if (cancelled()) return;
     if (!backBlob) { show('error', 'Failed to capture.'); return; }
-    stopAllStreams();
+    stopCaptureStreams();
     show('switching');
     await new Promise(r => setTimeout(r, CAMERA_SWITCH_DELAY_MS));
+    if (cancelled()) return;
     show('front');
     startFront();
   }
@@ -297,20 +380,27 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
       const t = video.style.transform;
       video.style.transform = t ? `${t} scaleX(-1)` : 'scaleX(-1)';
     } catch (err) {
+      if (cancelled()) return;
       show('error', cameraErrorMessage(err));
       return;
     }
+    if (cancelled()) return;
     const countdownEl = document.getElementById('selfie-countdown');
     for (let i = 3; i >= 1; i--) {
       if (countdownEl) countdownEl.textContent = String(i);
       await new Promise(r => setTimeout(r, 1000));
+      if (cancelled()) return;
     }
     if (countdownEl) countdownEl.textContent = '';
     frontBlob = await captureFrame(video).catch(() => null);
+    if (cancelled()) return;
     if (!frontBlob) { show('error', 'Failed to capture selfie.'); return; }
-    stopAllStreams();
+    stopCaptureStreams();
     compositeBlob = await stitchPhotos(backBlob!, frontBlob).catch(() => null);
+    if (cancelled()) return;
     if (!compositeBlob) { show('error', 'Failed to stitch photos.'); return; }
+    progress = {};
+    void buildSaveBlob();
     show('preview');
   }
 
@@ -319,13 +409,21 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     d.className = 'w-full h-full flex flex-col';
 
     const imgWrapper = document.createElement('div');
-    imgWrapper.className = 'flex-1 min-h-0 flex items-center justify-center overflow-hidden';
+    imgWrapper.className = 'relative flex-1 min-h-0 flex items-center justify-center overflow-hidden';
     previewUrl = URL.createObjectURL(compositeBlob!);
     const img = document.createElement('img');
     img.src = previewUrl;
     img.className = 'max-w-full max-h-full object-contain';
     img.alt = 'Your meenow photo';
     imgWrapper.appendChild(img);
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'absolute top-[max(1rem,calc(env(safe-area-inset-top,0px)+0.5rem))] right-4 w-10 h-10 flex items-center justify-center rounded-full bg-black/50 text-white [&>svg]:size-5 active:scale-95';
+    saveBtn.setAttribute('aria-label', 'Save to device');
+    saveBtn.innerHTML = SAVE_ICON;
+    saveBtn.addEventListener('click', () => void handleSave(saveBtn));
+    imgWrapper.appendChild(saveBtn);
+
     d.appendChild(imgWrapper);
 
     const bar = document.createElement('div');
@@ -349,7 +447,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
         locBtn.className = 'text-xs text-gold border border-gold/30 rounded-full px-3 py-1.5 max-w-full truncate';
         locBtn.textContent = locationText;
         locBtn.title = 'Tap to clear location';
-        locBtn.onclick = () => { locationText = ''; renderLocBtn(); };
+        locBtn.onclick = () => { locationText = ''; coords = null; void buildSaveBlob(); renderLocBtn(); };
       } else {
         locBtn.className = 'text-xs text-ink/40 hover:text-gold transition-colors border border-ink/15 rounded-full px-3 py-1.5';
         locBtn.textContent = 'Add location';
@@ -362,22 +460,34 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
       locBtn.textContent = 'Getting location…';
       locBtn.disabled = true;
       locBtn.onclick = null;
+      coords = null;
       try {
         const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
           navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10_000 })
         );
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${pos.coords.latitude}&lon=${pos.coords.longitude}&zoom=10`,
-          { headers: { 'Accept-Language': 'en' } }
-        );
-        if (!res.ok) throw new Error('Geocoding failed');
-        const data = await res.json() as { address?: { city?: string; town?: string; village?: string; country?: string } };
-        const city = data.address?.city ?? data.address?.town ?? data.address?.village;
-        const country = data.address?.country;
-        locationText = `📍 ${[city, country].filter(Boolean).join(', ')}`;
+        coords = {
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+          alt: pos.coords.altitude ?? undefined,
+        };
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${coords.lat}&lon=${coords.lon}&zoom=10`,
+            { headers: { 'Accept-Language': 'en' } }
+          );
+          if (!res.ok) throw new Error('Geocoding failed');
+          const data = await res.json() as { address?: { city?: string; town?: string; village?: string; country?: string } };
+          const city = data.address?.city ?? data.address?.town ?? data.address?.village;
+          const country = data.address?.country;
+          locationText = `📍 ${[city, country].filter(Boolean).join(', ')}`;
+        } catch {
+          // Offline or geocoder unreachable: keep the fix as raw coordinates.
+          locationText = `📍 ${coords.lat.toFixed(2)}, ${coords.lon.toFixed(2)}`;
+        }
       } catch {
         locationText = '';
       }
+      void buildSaveBlob();
       locBtn.disabled = false;
       renderLocBtn();
     }
@@ -393,7 +503,8 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     retakeBtn.className = 'flex-1 border border-ink/20 text-ink rounded-full py-3 text-sm font-medium';
     retakeBtn.textContent = 'Retake';
     retakeBtn.addEventListener('click', () => {
-      backBlob = null; frontBlob = null; compositeBlob = null;
+      backBlob = null; frontBlob = null; compositeBlob = null; saveBlob = null;
+      progress = {};
       show('start'); // show() revokes previewUrl
     });
     btnRow.appendChild(retakeBtn);
@@ -415,13 +526,33 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     if (!auth) { show('error', 'Not logged in.'); return; }
     try {
       const parts = [statusText.trim(), locationText.trim()].filter(Boolean);
-      await postMeenow(auth, compositeBlob!, backBlob!, frontBlob!, parts.join('\n') || undefined);
+      await postMeenow(auth, compositeBlob!, backBlob!, frontBlob!, parts.join('\n') || undefined, progress);
       statusText = '';
       locationText = '';
+      progress = {};
       onPosted();
       onDone();
     } catch (err) {
-      show('error', err instanceof Error ? err.message : 'Upload failed.');
+      if (err instanceof TypeError) {
+        show('error', 'Network problem — your photo is safe.', err.message);
+      } else {
+        show('error', err instanceof Error ? err.message : 'Upload failed.');
+      }
+    }
+  }
+
+  async function handleSave(btn: HTMLButtonElement): Promise<void> {
+    const cached = saveBlob && saveBlobKey === exifKey() ? saveBlob : null;
+    const blob = cached ?? (await buildSaveBlob()) ?? compositeBlob;
+    if (!blob) return;
+    btn.disabled = true;
+    const result = await saveImage(blob, dateFilename('meenow', captureDate));
+    if ((result === 'shared' || result === 'downloaded') && btn.isConnected) {
+      btn.innerHTML = CHECK_ICON;
+      setTimeout(() => { btn.innerHTML = SAVE_ICON; btn.disabled = false; }, 1500);
+    } else {
+      btn.innerHTML = SAVE_ICON;
+      btn.disabled = false;
     }
   }
 
@@ -444,18 +575,36 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     return d;
   }
 
-  function makeError(message: string): HTMLElement {
+  function makeError(message: string, detail = ''): HTMLElement {
     const d = document.createElement('div');
     d.className = 'flex flex-col items-center gap-6 max-w-xs';
     const p = document.createElement('p');
     p.className = 'text-sm text-ink/70 leading-relaxed';
     p.textContent = message;
     d.appendChild(p);
+    if (detail) {
+      const dp = document.createElement('p');
+      dp.className = 'text-xs text-ink/40';
+      dp.textContent = detail;
+      d.appendChild(dp);
+    }
     const btn = document.createElement('button');
     btn.className = 'btn-primary';
     btn.textContent = 'Try again';
-    btn.addEventListener('click', () => show('start'));
-    d.appendChild(btn);
+    // A completed photo means the failure was in the upload: retry the post
+    // with the same blobs instead of restarting the camera flow.
+    if (compositeBlob) {
+      btn.addEventListener('click', () => void upload());
+      d.appendChild(btn);
+      const backBtn = document.createElement('button');
+      backBtn.className = 'border border-ink/20 text-ink rounded-full py-3 px-6 text-sm font-medium';
+      backBtn.textContent = 'Back to preview';
+      backBtn.addEventListener('click', () => show('preview'));
+      d.appendChild(backBtn);
+    } else {
+      btn.addEventListener('click', () => show('start'));
+      d.appendChild(btn);
+    }
     return d;
   }
 

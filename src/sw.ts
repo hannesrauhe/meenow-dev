@@ -52,6 +52,7 @@ function showDaily(): Promise<void> {
     icon: ICON,
     badge: BADGE,
     tag: 'meenow-daily',
+    data: { action: 'capture' },
   }).then(resetSilentCount);
 }
 
@@ -188,12 +189,21 @@ self.addEventListener('push', event => {
 
 self.addEventListener('notificationclick', event => {
   event.notification.close();
+  // The daily reminder carries { action: 'capture' } so a tap opens the capture
+  // screen directly (issue #56); other notifications open the feed.
+  const action = (event.notification.data as { action?: string } | undefined)?.action;
+  const url = action === 'capture' ? '/?action=capture' : '/';
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
       for (const client of clients) {
-        if ('focus' in client) { client.focus(); return; }
+        if ('focus' in client) {
+          client.focus();
+          // Focusing alone can't reroute the in-memory SPA, so signal the intent.
+          if (action) client.postMessage({ type: 'notification-action', action });
+          return;
+        }
       }
-      return self.clients.openWindow('/');
+      return self.clients.openWindow(url);
     }).catch(err => console.error('[sw] notificationclick failed', err))
   );
 });

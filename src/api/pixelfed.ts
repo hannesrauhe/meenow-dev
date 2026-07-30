@@ -9,6 +9,7 @@ import { MAX_POSTS_PER_TRIGGER } from '../state';
 interface MastodonAccount {
   id: string;
   username: string;
+  acct: string;
   display_name: string;
   avatar: string;
   url: string;
@@ -48,7 +49,9 @@ export interface FeedPost {
     id: string;
     displayName: string;
     username: string;
+    acct: string;
     avatarUrl: string;
+    url: string;
   };
   compositeUrl: string;
   allMediaUrls: string[];
@@ -72,12 +75,37 @@ interface PostContext {
 
 // --- Upload / post ---
 
+const RETRY_DELAYS_MS = [1000, 2000];
+
+// Retries transport-level failures (TypeError: the request never reached the
+// server) with backoff, and a 5xx response once. 4xx returns immediately.
+async function fetchRetry(url: string, init: RequestInit): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetch(url, init);
+      if (res.status < 500 || attempt >= 1) return res;
+    } catch (err) {
+      if (!(err instanceof TypeError) || attempt >= RETRY_DELAYS_MS.length) throw err;
+    }
+    await new Promise(r => setTimeout(r, RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)]));
+  }
+}
+
+// Upload progress carried across manual retries: media already uploaded are
+// not re-uploaded, and the idempotency key prevents a duplicate status.
+export interface PostProgress {
+  compositeId?: string;
+  backId?: string;
+  frontId?: string;
+  idemKey?: string;
+}
+
 async function uploadOne(auth: AuthState, blob: Blob, description: string): Promise<string> {
   const form = new FormData();
   form.append('file', blob, 'meenow.jpg');
   form.append('description', description);
 
-  const res = await fetch(`https://${auth.instance}/api/v1/media`, {
+  const res = await fetchRetry(`https://${auth.instance}/api/v1/media`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${auth.accessToken}` },
     body: form,
@@ -89,7 +117,7 @@ async function uploadOne(auth: AuthState, blob: Blob, description: string): Prom
 
   for (let i = 0; i < 20; i++) {
     await new Promise(r => setTimeout(r, 1500));
-    const poll = await fetch(`https://${auth.instance}/api/v1/media/${media.id}`, {
+    const poll = await fetchRetry(`https://${auth.instance}/api/v1/media/${media.id}`, {
       headers: { Authorization: `Bearer ${auth.accessToken}` },
     });
     if (!poll.ok) throw new Error(`Media poll failed (${poll.status})`);
@@ -105,24 +133,27 @@ export async function postMeenow(
   backPhoto: Blob,
   frontPhoto: Blob,
   statusText?: string,
+  progress: PostProgress = {},
 ): Promise<string> {
   // Upload composite first so it gets the lowest attachment ID and appears first in the gallery
-  const compositeId = await uploadOne(auth, composite, 'meenow — daily photo');
-  const [backId, frontId] = await Promise.all([
-    uploadOne(auth, backPhoto, 'meenow — surroundings'),
-    uploadOne(auth, frontPhoto, 'meenow — selfie'),
+  progress.compositeId ??= await uploadOne(auth, composite, 'meenow — daily photo');
+  [progress.backId, progress.frontId] = await Promise.all([
+    progress.backId ?? uploadOne(auth, backPhoto, 'meenow — surroundings'),
+    progress.frontId ?? uploadOne(auth, frontPhoto, 'meenow — selfie'),
   ]);
 
+  progress.idemKey ??= crypto.randomUUID();
   const status = statusText ? `${statusText}\n\n#meenowApp` : '#meenowApp';
-  const res = await fetch(`https://${auth.instance}/api/v1/statuses`, {
+  const res = await fetchRetry(`https://${auth.instance}/api/v1/statuses`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${auth.accessToken}`,
       'Content-Type': 'application/json',
+      'Idempotency-Key': progress.idemKey,
     },
     body: JSON.stringify({
       status,
-      media_ids: [compositeId, backId, frontId],
+      media_ids: [progress.compositeId, progress.backId, progress.frontId],
       visibility: 'private',
     }),
   });
@@ -141,6 +172,11 @@ export async function postMeenow(
   if (_homeCache) {
     _homeCache.statuses = [statusData, ..._homeCache.statuses];
     if (isNewerId(statusData.id, _homeCache.newestId)) _homeCache.newestId = statusData.id;
+  } else {
+    // No cache yet (e.g. posting before the first feed fetch resolved): seed one
+    // so the post shows immediately. newestId stays empty so the next fetch is a
+    // full one that backfills friends' posts; fetchedAt 0 makes it fire at once.
+    _homeCache = { statuses: [statusData], newestId: '', fetchedAt: 0 };
   }
   return statusData.url;
 }
@@ -170,9 +206,11 @@ interface HomeCache { statuses: MastodonStatus[]; newestId: string; fetchedAt: n
 let _homeCache: HomeCache | null = null;
 let _homePending: Promise<MastodonStatus[]> | null = null;
 
-function fetchHomeTimeline(auth: AuthState): Promise<MastodonStatus[]> {
+// `force` skips the TTL short-circuit (explicit user refresh); the fetch itself
+// stays incremental via since_id and concurrent callers still share _homePending.
+function fetchHomeTimeline(auth: AuthState, force = false): Promise<MastodonStatus[]> {
   if (_homePending) return _homePending;
-  if (_homeCache && Date.now() - _homeCache.fetchedAt < HOME_CACHE_TTL_MS) {
+  if (!force && _homeCache && Date.now() - _homeCache.fetchedAt < HOME_CACHE_TTL_MS) {
     return Promise.resolve(_homeCache.statuses);
   }
 
@@ -181,7 +219,12 @@ function fetchHomeTimeline(auth: AuthState): Promise<MastodonStatus[]> {
     : `https://${auth.instance}/api/v1/timelines/home?limit=${HOME_TIMELINE_LIMIT}`;
 
   _homePending = fetch(url, { headers: { Authorization: `Bearer ${auth.accessToken}` } })
-    .then(r => (r.ok ? (r.json() as Promise<MastodonStatus[]>) : Promise.resolve([])))
+    .then(r => {
+      // A failed fetch must reject, not resolve empty: an empty result would be
+      // cached and render as a legitimately empty feed / zero post count.
+      if (!r.ok) throw new Error(`Home timeline fetch failed (${r.status})`);
+      return r.json() as Promise<MastodonStatus[]>;
+    })
     .then(incoming => {
       const now = Date.now();
       if (_homeCache) {
@@ -255,7 +298,9 @@ function toFeedPost(s: MastodonStatus): FeedPost {
       id: s.account.id,
       displayName: s.account.display_name || s.account.username,
       username: s.account.username,
+      acct: s.account.acct || s.account.username,
       avatarUrl: s.account.avatar,
+      url: s.account.url,
     },
     compositeUrl: s.media_attachments[0]?.url ?? '',
     allMediaUrls: s.media_attachments.map(m => m.url),
@@ -282,9 +327,9 @@ function triggerArchive(auth: AuthState, statuses: MastodonStatus[]): void {
   );
 }
 
-export async function fetchMeenowFeed(auth: AuthState): Promise<FeedPost[]> {
+export async function fetchMeenowFeed(auth: AuthState, force = false): Promise<FeedPost[]> {
   const cutoff = getLastTriggerTime().getTime();
-  const statuses = await fetchHomeTimeline(auth);
+  const statuses = await fetchHomeTimeline(auth, force);
   triggerArchive(auth, statuses);
   const sorted = statuses
     .filter(s =>
