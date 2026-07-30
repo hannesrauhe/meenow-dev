@@ -16,9 +16,12 @@ interface Entry {
   value: Uint8Array;
 }
 
+// NUL-terminated; UTF-8 for non-ASCII (spec says ASCII, but UTF-8 in
+// ImageDescription is the de-facto convention readers handle).
 function ascii(s: string): Uint8Array {
-  const bytes = new Uint8Array(s.length + 1); // NUL-terminated
-  for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
+  const enc = new TextEncoder().encode(s);
+  const bytes = new Uint8Array(enc.length + 1);
+  bytes.set(enc);
   return bytes;
 }
 
@@ -104,7 +107,7 @@ function dms(abs: number): Array<[number, number]> {
 
 export async function insertExif(
   jpeg: Blob,
-  opts: { date: Date; lat?: number; lon?: number },
+  opts: { date: Date; description?: string; lat?: number; lon?: number; alt?: number },
 ): Promise<Blob> {
   const src = new Uint8Array(await jpeg.arrayBuffer());
   if (src[0] !== 0xff || src[1] !== 0xd8) return jpeg;
@@ -129,19 +132,30 @@ export async function insertExif(
         { tag: 0x0004, type: RATIONAL, count: 3, value: rationals(dms(Math.abs(opts.lon!))) },
       ]
     : [];
+  if (hasGps && typeof opts.alt === 'number' && Number.isFinite(opts.alt)) {
+    gpsEntries.push(
+      { tag: 0x0005, type: BYTE, count: 1, value: new Uint8Array([opts.alt < 0 ? 1 : 0]) }, // GPSAltitudeRef: below sea level flag
+      { tag: 0x0006, type: RATIONAL, count: 1, value: rationals([[Math.round(Math.abs(opts.alt) * 100), 100]]) },
+    );
+  }
 
   const ifd0Offset = 8;
-  const ifd0Entries: Entry[] = [
+  const exifPtr: Entry = { tag: 0x8769, type: LONG, count: 1, value: longVal(0) }; // patched below
+  const gpsPtr: Entry = { tag: 0x8825, type: LONG, count: 1, value: longVal(0) };
+  const ifd0Entries: Entry[] = [];
+  if (opts.description) ifd0Entries.push(asciiEntry(0x010e, opts.description)); // ImageDescription
+  ifd0Entries.push(
     { tag: 0x0112, type: SHORT, count: 1, value: shortVal(1) }, // Orientation
+    asciiEntry(0x0131, 'meenow'),                               // Software
     asciiEntry(0x0132, dateStr),                                // DateTime
-    { tag: 0x8769, type: LONG, count: 1, value: longVal(0) },   // Exif IFD pointer, patched below
-  ];
-  if (hasGps) ifd0Entries.push({ tag: 0x8825, type: LONG, count: 1, value: longVal(0) });
+    exifPtr,
+  );
+  if (hasGps) ifd0Entries.push(gpsPtr);
 
   const exifOffset = ifd0Offset + ifdSize(ifd0Entries);
   const gpsOffset = exifOffset + ifdSize(exifEntries);
-  ifd0Entries[2].value = longVal(exifOffset);
-  if (hasGps) ifd0Entries[3].value = longVal(gpsOffset);
+  exifPtr.value = longVal(exifOffset);
+  if (hasGps) gpsPtr.value = longVal(gpsOffset);
 
   const tiffSize = hasGps ? gpsOffset + ifdSize(gpsEntries) : gpsOffset;
   const tiff = new Uint8Array(tiffSize);

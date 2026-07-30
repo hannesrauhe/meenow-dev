@@ -185,19 +185,31 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
   let locationText = '';
   let progress: PostProgress = {};
   let captureDate = new Date();
-  let coords: { lat: number; lon: number } | null = null;
+  let coords: { lat: number; lon: number; alt?: number } | null = null;
   let saveBlob: Blob | null = null;
+  let saveBlobKey = '';
+
+  function exifKey(): string {
+    return JSON.stringify([statusText.trim(), coords]);
+  }
 
   // Pre-compute the EXIF-tagged copy for "Save to device" so the save tap can
-  // call navigator.share without a preceding await (Safari drops the transient
-  // user activation otherwise). EXIF goes only into the saved copy, never into
-  // the upload: the app deliberately shares location as city-level text only.
-  function refreshSaveBlob(): void {
+  // usually call navigator.share without a preceding await (Safari drops the
+  // transient user activation after long waits); a stale cache (caption edited
+  // since) is rebuilt in handleSave — milliseconds of in-memory work. EXIF goes
+  // only into the saved copy, never into the upload: the app deliberately
+  // shares location as city-level text only.
+  async function buildSaveBlob(): Promise<Blob | null> {
     const source = compositeBlob;
-    if (!source) { saveBlob = null; return; }
-    void insertExif(source, { date: captureDate, ...(coords ?? {}) }).then(b => {
-      if (compositeBlob === source) saveBlob = b;
+    if (!source) { saveBlob = null; return null; }
+    const key = exifKey();
+    const b = await insertExif(source, {
+      date: captureDate,
+      description: statusText.trim() || undefined,
+      ...(coords ?? {}),
     });
+    if (compositeBlob === source) { saveBlob = b; saveBlobKey = key; }
+    return b;
   }
 
   function show(step: Step, message = '', detail = ''): void {
@@ -331,7 +343,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     compositeBlob = await stitchPhotos(backBlob!, frontBlob).catch(() => null);
     if (!compositeBlob) { show('error', 'Failed to stitch photos.'); return; }
     progress = {};
-    refreshSaveBlob();
+    void buildSaveBlob();
     show('preview');
   }
 
@@ -378,7 +390,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
         locBtn.className = 'text-xs text-gold border border-gold/30 rounded-full px-3 py-1.5 max-w-full truncate';
         locBtn.textContent = locationText;
         locBtn.title = 'Tap to clear location';
-        locBtn.onclick = () => { locationText = ''; coords = null; refreshSaveBlob(); renderLocBtn(); };
+        locBtn.onclick = () => { locationText = ''; coords = null; void buildSaveBlob(); renderLocBtn(); };
       } else {
         locBtn.className = 'text-xs text-ink/40 hover:text-gold transition-colors border border-ink/15 rounded-full px-3 py-1.5';
         locBtn.textContent = 'Add location';
@@ -396,7 +408,11 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
         const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
           navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10_000 })
         );
-        coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        coords = {
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+          alt: pos.coords.altitude ?? undefined,
+        };
         try {
           const res = await fetch(
             `https://nominatim.openstreetmap.org/reverse?format=json&lat=${coords.lat}&lon=${coords.lon}&zoom=10`,
@@ -414,7 +430,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
       } catch {
         locationText = '';
       }
-      refreshSaveBlob();
+      void buildSaveBlob();
       locBtn.disabled = false;
       renderLocBtn();
     }
@@ -469,7 +485,8 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
   }
 
   async function handleSave(btn: HTMLButtonElement): Promise<void> {
-    const blob = saveBlob ?? compositeBlob;
+    const cached = saveBlob && saveBlobKey === exifKey() ? saveBlob : null;
+    const blob = cached ?? (await buildSaveBlob()) ?? compositeBlob;
     if (!blob) return;
     btn.disabled = true;
     const result = await saveImage(blob, dateFilename('meenow', captureDate));
