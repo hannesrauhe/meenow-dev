@@ -54,6 +54,36 @@ function applyViewfinderTransform(video: HTMLVideoElement): void {
   video.style.transform = `translate(-50%, -50%) rotate(${deg}deg)`;
 }
 
+// Thumb-height shutter anchor (issue #72): bottom-center in portrait; in
+// landscape the browser rotates the layout, so anchor to the side edge the
+// bottom rotated to (landscape-primary → right, landscape-secondary → left)
+// and the button stays physically under the thumb.
+function shutterPositionClasses(): string {
+  const type = screen.orientation?.type ?? '';
+  if (type === 'landscape-secondary') {
+    return 'absolute left-[max(3rem,calc(env(safe-area-inset-left,0px)+1rem))] top-1/2 -translate-y-1/2';
+  }
+  if (type.startsWith('landscape')) {
+    return 'absolute right-[max(3rem,calc(env(safe-area-inset-right,0px)+1rem))] top-1/2 -translate-y-1/2';
+  }
+  return 'absolute bottom-[max(3rem,calc(env(safe-area-inset-bottom,0px)+1rem))] left-1/2 -translate-x-1/2';
+}
+
+// Applies the orientation-aware anchor and keeps it updated while the button
+// is mounted; the listener removes itself once the button leaves the DOM
+// (same self-cleanup pattern as the feed-header countdown).
+function positionShutter(btn: HTMLElement, baseClasses: string): void {
+  const apply = () => { btn.className = `${shutterPositionClasses()} ${baseClasses}`; };
+  apply();
+  const target: EventTarget = screen.orientation ?? window;
+  const event = screen.orientation ? 'change' : 'orientationchange';
+  const onChange = () => {
+    if (!btn.isConnected) { target.removeEventListener(event, onChange); return; }
+    apply();
+  };
+  target.addEventListener(event, onChange);
+}
+
 // Grab the current preview frame so the photo matches the viewfinder exactly —
 // no still-pipeline lag or AE/AWB shift (issue #76). Orientation is corrected
 // using the actual device angle at capture time.
@@ -204,6 +234,8 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
     root.className = step === 'back' || step === 'front' || step === 'preview'
       ? 'fixed inset-0 bg-black'
+      // 'start' reserves bottom space for its absolutely anchored shutter (portrait only).
+      : step === 'start' ? 'screen gap-8 text-center relative pb-40 landscape:pb-0'
       : 'screen gap-8 text-center';
     root.innerHTML = '';
 
@@ -231,7 +263,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
       </div>
     `;
     const btn = document.createElement('button');
-    btn.className = 'w-20 h-20 text-ink hover:text-gold transition-colors active:scale-95';
+    positionShutter(btn, 'w-20 h-20 text-ink hover:text-gold transition-colors active:scale-95');
     btn.setAttribute('aria-label', 'Start camera');
     btn.innerHTML = CAT_EARS_SHUTTER;
     btn.addEventListener('click', () => show('back'));
@@ -264,7 +296,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     d.appendChild(hint);
 
     const btn = document.createElement('button');
-    btn.className = 'absolute bottom-[max(3rem,calc(env(safe-area-inset-bottom,0px)+1rem))] left-1/2 -translate-x-1/2 w-20 h-20 text-white drop-shadow-lg active:scale-95';
+    positionShutter(btn, 'w-20 h-20 text-white drop-shadow-lg active:scale-95');
     btn.setAttribute('aria-label', 'Capture');
     btn.innerHTML = CAT_EARS_SHUTTER;
     btn.addEventListener('click', () => captureBack(video));
