@@ -12,7 +12,7 @@ type Step = 'start' | 'back' | 'switching' | 'front' | 'preview' | 'uploading' |
 
 let activeStreams: MediaStream[] = [];
 
-function stopAllStreams(): void {
+export function stopCaptureStreams(): void {
   activeStreams.forEach(s => s.getTracks().forEach(t => t.stop()));
   activeStreams = [];
 }
@@ -190,10 +190,16 @@ function cameraErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Could not access camera.';
 }
 
-export function renderCapture(postCount: number, onPosted: () => void, onDone: () => void): HTMLElement {
+export function renderCapture(
+  postCount: number,
+  onPosted: () => void,
+  onDone: () => void,
+  onCancel: () => void,
+): HTMLElement {
   const root = document.createElement('div');
   root.id = 'screen-capture';
 
+  let closing = false;
   let backBlob: Blob | null = null;
   let frontBlob: Blob | null = null;
   let compositeBlob: Blob | null = null;
@@ -230,7 +236,7 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
   }
 
   function show(step: Step, message = '', detail = ''): void {
-    stopAllStreams();
+    stopCaptureStreams();
     if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
     root.className = step === 'back' || step === 'front' || step === 'preview'
       ? 'fixed inset-0 bg-black'
@@ -246,6 +252,27 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     else if (step === 'preview') root.appendChild(makePreview());
     else if (step === 'uploading') root.appendChild(makeSpinner());
     else root.appendChild(makeError(message, detail));
+
+    // Exit route on every non-transient step — iOS has no hardware back
+    // button (issue #71). Hidden while switching (~600ms) and uploading.
+    if (step !== 'switching' && step !== 'uploading') root.appendChild(makeCancel(step));
+  }
+
+  function makeCancel(step: Step): HTMLElement {
+    const dark = step === 'back' || step === 'front' || step === 'preview';
+    const btn = document.createElement('button');
+    // fixed, not absolute: on cream steps root is not a positioned ancestor.
+    btn.className = `fixed top-[max(1rem,calc(env(safe-area-inset-top,0px)+0.5rem))] left-4 w-10 h-10 flex items-center justify-center rounded-full text-2xl leading-none ${
+      dark ? 'bg-black/50 text-white' : 'text-ink/40 hover:text-gold transition-colors'
+    }`;
+    btn.textContent = '×';
+    btn.setAttribute('aria-label', 'Cancel');
+    btn.addEventListener('click', () => {
+      closing = true;
+      stopCaptureStreams();
+      onCancel();
+    });
+    return btn;
   }
 
   function makeStart(): HTMLElement {
@@ -308,13 +335,19 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
     return d;
   }
 
+  function cancelled(): boolean {
+    return closing || !root.isConnected;
+  }
+
   async function captureBack(video: HTMLVideoElement): Promise<void> {
     captureDate = new Date();
     backBlob = await captureFrame(video).catch(() => null);
+    if (cancelled()) return;
     if (!backBlob) { show('error', 'Failed to capture.'); return; }
-    stopAllStreams();
+    stopCaptureStreams();
     show('switching');
     await new Promise(r => setTimeout(r, CAMERA_SWITCH_DELAY_MS));
+    if (cancelled()) return;
     show('front');
     startFront();
   }
@@ -347,19 +380,24 @@ export function renderCapture(postCount: number, onPosted: () => void, onDone: (
       const t = video.style.transform;
       video.style.transform = t ? `${t} scaleX(-1)` : 'scaleX(-1)';
     } catch (err) {
+      if (cancelled()) return;
       show('error', cameraErrorMessage(err));
       return;
     }
+    if (cancelled()) return;
     const countdownEl = document.getElementById('selfie-countdown');
     for (let i = 3; i >= 1; i--) {
       if (countdownEl) countdownEl.textContent = String(i);
       await new Promise(r => setTimeout(r, 1000));
+      if (cancelled()) return;
     }
     if (countdownEl) countdownEl.textContent = '';
     frontBlob = await captureFrame(video).catch(() => null);
+    if (cancelled()) return;
     if (!frontBlob) { show('error', 'Failed to capture selfie.'); return; }
-    stopAllStreams();
+    stopCaptureStreams();
     compositeBlob = await stitchPhotos(backBlob!, frontBlob).catch(() => null);
+    if (cancelled()) return;
     if (!compositeBlob) { show('error', 'Failed to stitch photos.'); return; }
     progress = {};
     void buildSaveBlob();

@@ -7,7 +7,7 @@ import { getLastTriggerTime, type AppState } from './timer';
 import { MAX_POSTS_PER_TRIGGER, getPendingAdd, setPendingAdd, clearPendingAdd, clearPwaSubbed } from './state';
 import { fetchTodayPostCount, deletePost, removePostFromCache } from './api/pixelfed';
 import type { Connection } from './api/social';
-import { renderCapture } from './screens/capture';
+import { renderCapture, stopCaptureStreams } from './screens/capture';
 import { renderFeed } from './screens/feed';
 import { renderGrid } from './screens/grid';
 import { renderCircle } from './screens/circle';
@@ -193,12 +193,13 @@ function mountCapture(): void {
 
   history.pushState({ screen: 'capturing' }, '');
 
-  const onPopState = () => { activeScreen = null; tick(); };
+  // Stop the camera here too: hardware back exits without going through the
+  // capture screen's own cancel handler.
+  const onPopState = () => { stopCaptureStreams(); activeScreen = null; tick(); };
   window.addEventListener('popstate', onPopState, { once: true });
 
-  app.appendChild(renderCapture(periodPostCount, onPosted, () => {
-    history.back();
-  }));
+  const close = () => { history.back(); };
+  app.appendChild(renderCapture(periodPostCount, onPosted, close, close));
 }
 
 // Converts a post author into the Connection shape the peer screen expects.
