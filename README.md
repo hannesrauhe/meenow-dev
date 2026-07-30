@@ -61,7 +61,7 @@ Mobile browsers cannot stream two cameras simultaneously. The sequential flow:
 2. Stop the back-camera stream and open front camera (`facingMode: "user"`). Display a 3-second fullscreen countdown, then auto-capture the selfie.
 3. **Canvas stitching:** Back frame as full background; selfie as a rounded rectangle inset (≈35% width, white border, top-left corner). Exported as JPEG at quality 0.92.
 
-An orientation toggle lets users choose portrait (default, with auto-rotation for landscape streams) or landscape.
+Photos are grabbed directly from the live preview frame (canvas `drawImage`), so the captured image matches the viewfinder exactly — no still-pipeline shutter lag or white-balance shift. Capture resolution therefore equals the video stream resolution (up to 4K where supported).
 
 **Permission handling:** `NotAllowedError` and `NotFoundError` from `getUserMedia` surface a platform-aware error card with instructions for Android and iOS.
 
