@@ -39,7 +39,14 @@ jobs:
           DEFAULT_TZ: Europe/Berlin
         run: node scripts/send-tick.mjs
 
-      - name: Commit expired subscription removals
+      # xkcd sends no CORS headers, so the app reads this mirror from the
+      # push repo instead (src/api/xkcd.ts). Fail-soft: never blocks the tick.
+      - name: Mirror xkcd comic
+        env:
+          OUT_FILE: push-subs/xkcd.json
+        run: node scripts/fetch-xkcd.mjs
+
+      - name: Commit push-repo changes
         working-directory: push-subs
         env:
           SUBS_PATH: ${{ secrets.VITE_PUSH_SUBS_PATH }}
@@ -47,4 +54,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
           git add "$SUBS_PATH/"
-          git diff --staged --quiet || (git commit -m "Remove expired subscriptions" && git push)
+          [ ! -f xkcd.json ] || git add xkcd.json
+          # Rebase first: the dev and prod repos run this workflow on the same
+          # schedule against the same push repo, so pushes can race.
+          git diff --staged --quiet || (git commit -m "Update push data" && git pull --rebase && git push)
