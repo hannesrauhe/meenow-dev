@@ -246,7 +246,7 @@ async function loadFeed(container: HTMLElement, auth: AuthState, postCount: numb
     posts.forEach(post => container.appendChild(makePostCard(post, unblurred, auth, onOpenPost, onOpenPeer)));
   }
 
-  // Daily bonus card (Wikipedia picture of the day + "did you know") fills the
+  // Daily bonus card (Wikimedia picture of the day) fills the
   // bottom of the feed — especially valuable while the circle is quiet. Fully
   // best-effort: on failure the placeholder just stays empty.
   const bonusSlot = document.createElement('div');
@@ -273,58 +273,46 @@ function makeBonusCard(bonus: DailyBonus): HTMLElement {
 
   const nameEl = document.createElement('p');
   nameEl.className = 'text-sm font-medium text-ink truncate';
-  nameEl.textContent = 'Daily discovery';
+  nameEl.textContent = 'Picture of the day';
   info.appendChild(nameEl);
 
   const metaEl = document.createElement('p');
   metaEl.className = 'text-xs text-ink/40 truncate';
-  metaEl.textContent = bonus.imageCredit ? `Wikimedia Commons · ${bonus.imageCredit}` : 'Wikipedia';
+  metaEl.textContent = bonus.imageCredit ? `Wikimedia Commons · ${bonus.imageCredit}` : 'Wikimedia Commons';
   info.appendChild(metaEl);
 
   header.appendChild(info);
   card.appendChild(header);
 
-  if (bonus.imageUrl) {
-    const link = document.createElement('a');
-    link.href = bonus.imageLink || 'https://commons.wikimedia.org/wiki/Main_Page';
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    const photo = document.createElement('img');
-    photo.src = bonus.imageUrl;
-    photo.className = 'w-full block';
-    photo.alt = bonus.imageTitle;
-    photo.loading = 'lazy';
-    link.appendChild(photo);
-    card.appendChild(link);
-    if (bonus.imageTitle) {
-      const titleEl = document.createElement('p');
-      titleEl.className = 'px-4 pt-2 text-xs text-ink/40';
-      titleEl.textContent = bonus.imageTitle;
-      card.appendChild(titleEl);
-    }
-  }
+  const link = document.createElement('a');
+  link.href = bonus.imageLink || 'https://commons.wikimedia.org/wiki/Main_Page';
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  const photo = document.createElement('img');
+  photo.src = bonus.imageUrl;
+  photo.className = 'w-full block';
+  photo.alt = bonus.imageTitle;
+  photo.loading = 'lazy';
+  link.appendChild(photo);
+  card.appendChild(link);
 
-  if (bonus.dykText) {
-    const fact = document.createElement('p');
-    fact.className = 'px-4 pt-2 pb-3 text-sm text-ink leading-relaxed';
-    const prefix = document.createElement('span');
-    prefix.className = 'font-medium';
-    prefix.textContent = 'Did you know ';
-    fact.appendChild(prefix);
-    if (bonus.dykLink) {
-      const factLink = document.createElement('a');
-      factLink.href = bonus.dykLink;
-      factLink.target = '_blank';
-      factLink.rel = 'noopener noreferrer';
-      factLink.textContent = bonus.dykText;
-      fact.appendChild(factLink);
-    } else {
-      fact.appendChild(document.createTextNode(bonus.dykText));
-    }
-    card.appendChild(fact);
-  } else {
-    card.appendChild(Object.assign(document.createElement('div'), { className: 'pb-2' }));
+  const meta = document.createElement('div');
+  meta.className = 'px-4 pt-2 pb-3 flex flex-col gap-1.5';
+  const captionText = bonus.description || bonus.imageTitle;
+  if (captionText) {
+    const caption = document.createElement('p');
+    caption.className = 'text-sm text-ink leading-relaxed';
+    caption.textContent = captionText;
+    meta.appendChild(caption);
   }
+  const moreLink = document.createElement('a');
+  moreLink.href = link.href;
+  moreLink.target = '_blank';
+  moreLink.rel = 'noopener noreferrer';
+  moreLink.className = 'text-xs text-gold';
+  moreLink.textContent = 'More on Wikimedia Commons →';
+  meta.appendChild(moreLink);
+  card.appendChild(meta);
 
   return card;
 }
