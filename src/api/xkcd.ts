@@ -1,11 +1,11 @@
 // Second daily bonus card: the current xkcd comic. xkcd's API has no CORS
 // headers, so a cron step (scripts/fetch-xkcd.mjs, run by send-tick.yml)
-// mirrors it into xkcd.json in the push relay repo, read here via the GitHub
-// contents API with the relay token (works for private repos too).
+// mirrors it into xkcd.json in the (public) push relay repo, read here via
+// raw.githubusercontent.com — CORS-enabled, no auth, ~5 min CDN cache.
 //
-// SECURITY: the relay token ships in the client bundle, so anyone can write
-// to the relay repo — the mirrored JSON is untrusted user input. Every field
-// is validated here: the image URL is allowlisted to https://imgs.xkcd.com,
+// SECURITY: anyone holding the client-shipped relay token can write to the
+// relay repo — the mirrored JSON is untrusted user input. Every field is
+// validated here: the image URL is allowlisted to https://imgs.xkcd.com,
 // the comic link is constructed from the validated integer `num` (never read
 // from the file), and text fields are length-capped and only ever rendered
 // via textContent.
@@ -17,8 +17,7 @@ export interface XkcdBonus {
   alt: string;
 }
 
-const PUSH_RELAY_TOKEN = import.meta.env.VITE_PUSH_RELAY_TOKEN as string | undefined;
-const MIRROR_URL = 'https://api.github.com/repos/meenow-de/meenow-push/contents/xkcd.json';
+const MIRROR_URL = 'https://raw.githubusercontent.com/meenow-de/meenow-push/refs/heads/main/xkcd.json';
 
 const CACHE_KEY = 'meenow:xkcd-bonus';
 const MAX_TEXT_LEN = 1000;
@@ -61,7 +60,6 @@ function sanitize(data: unknown): XkcdBonus | null {
 }
 
 export async function fetchXkcdBonus(): Promise<XkcdBonus | null> {
-  if (!PUSH_RELAY_TOKEN) return null; // local build without push config
   const date = todayKey(new Date());
   try {
     const cached = JSON.parse(localStorage.getItem(CACHE_KEY) ?? 'null') as CachedXkcd | null;
@@ -70,12 +68,7 @@ export async function fetchXkcdBonus(): Promise<XkcdBonus | null> {
 
   let bonus: XkcdBonus | null = null;
   try {
-    const res = await fetch(MIRROR_URL, {
-      headers: {
-        Accept: 'application/vnd.github.raw+json',
-        Authorization: `Bearer ${PUSH_RELAY_TOKEN}`,
-      },
-    });
+    const res = await fetch(MIRROR_URL);
     if (!res.ok) return null; // don't cache transient failures
     bonus = sanitize(await res.json());
   } catch {
