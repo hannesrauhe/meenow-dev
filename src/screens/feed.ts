@@ -247,19 +247,19 @@ async function loadFeed(container: HTMLElement, auth: AuthState, postCount: numb
     posts.forEach(post => container.appendChild(makePostCard(post, unblurred, auth, onOpenPost, onOpenPeer)));
   }
 
-  // Daily bonus card (Wikimedia picture of the day) fills the
+  // Bonus cards (xkcd, then Wikimedia picture of the day) fill the
   // bottom of the feed — especially valuable while the circle is quiet. Fully
   // best-effort: on failure the placeholder just stays empty.
-  const bonusSlot = document.createElement('div');
-  container.appendChild(bonusSlot);
-  void fetchDailyBonus().then(bonus => {
-    if (bonus && bonusSlot.isConnected) bonusSlot.replaceWith(makeBonusCard(bonus));
-  });
-
   const xkcdSlot = document.createElement('div');
   container.appendChild(xkcdSlot);
   void fetchXkcdBonus().then(bonus => {
     if (bonus && xkcdSlot.isConnected) xkcdSlot.replaceWith(makeXkcdCard(bonus));
+  });
+
+  const bonusSlot = document.createElement('div');
+  container.appendChild(bonusSlot);
+  void fetchDailyBonus().then(bonus => {
+    if (bonus && bonusSlot.isConnected) bonusSlot.replaceWith(makeBonusCard(bonus));
   });
 }
 
