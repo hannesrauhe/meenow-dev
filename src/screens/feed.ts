@@ -3,6 +3,7 @@ import { SLEEPING_CAT, SPEECH_BUBBLE_ICON, GRID_ICON, PEOPLE_ICON } from '../ico
 import { clearAuth, getAuthState, type AuthState } from '../api/auth';
 import { MAX_POSTS_PER_TRIGGER } from '../state';
 import { fetchMeenowFeed, type FeedPost } from '../api/pixelfed';
+import { fetchDailyBonus, type DailyBonus } from '../api/dailyBonus';
 import { fetchPendingRequestCount } from '../api/social';
 import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime, formatCountdown, formatRelativeTime } from '../timer';
 
@@ -240,11 +241,92 @@ async function loadFeed(container: HTMLElement, auth: AuthState, postCount: numb
         <p class="text-sm">No meenow posts from friends yet today.</p>
       </div>
     `;
-    return;
+  } else {
+    const unblurred = postCount > 0;
+    posts.forEach(post => container.appendChild(makePostCard(post, unblurred, auth, onOpenPost, onOpenPeer)));
   }
 
-  const unblurred = postCount > 0;
-  posts.forEach(post => container.appendChild(makePostCard(post, unblurred, auth, onOpenPost, onOpenPeer)));
+  // Daily bonus card (Wikipedia picture of the day + "did you know") fills the
+  // bottom of the feed — especially valuable while the circle is quiet. Fully
+  // best-effort: on failure the placeholder just stays empty.
+  const bonusSlot = document.createElement('div');
+  container.appendChild(bonusSlot);
+  void fetchDailyBonus().then(bonus => {
+    if (bonus && bonusSlot.isConnected) bonusSlot.replaceWith(makeBonusCard(bonus));
+  });
+}
+
+function makeBonusCard(bonus: DailyBonus): HTMLElement {
+  const card = document.createElement('article');
+  card.className = 'border-b border-t border-ink/8';
+
+  const header = document.createElement('div');
+  header.className = 'flex items-center gap-3 px-4 py-3';
+
+  const badge = document.createElement('div');
+  badge.className = 'w-9 h-9 rounded-full bg-gold-light shrink-0 flex items-center justify-center text-lg';
+  badge.textContent = '🌍';
+  header.appendChild(badge);
+
+  const info = document.createElement('div');
+  info.className = 'flex-1 min-w-0';
+
+  const nameEl = document.createElement('p');
+  nameEl.className = 'text-sm font-medium text-ink truncate';
+  nameEl.textContent = 'Daily discovery';
+  info.appendChild(nameEl);
+
+  const metaEl = document.createElement('p');
+  metaEl.className = 'text-xs text-ink/40 truncate';
+  metaEl.textContent = bonus.imageCredit ? `Wikimedia Commons · ${bonus.imageCredit}` : 'Wikipedia';
+  info.appendChild(metaEl);
+
+  header.appendChild(info);
+  card.appendChild(header);
+
+  if (bonus.imageUrl) {
+    const link = document.createElement('a');
+    link.href = bonus.imageLink || 'https://commons.wikimedia.org/wiki/Main_Page';
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    const photo = document.createElement('img');
+    photo.src = bonus.imageUrl;
+    photo.className = 'w-full block';
+    photo.alt = bonus.imageTitle;
+    photo.loading = 'lazy';
+    link.appendChild(photo);
+    card.appendChild(link);
+    if (bonus.imageTitle) {
+      const titleEl = document.createElement('p');
+      titleEl.className = 'px-4 pt-2 text-xs text-ink/40';
+      titleEl.textContent = bonus.imageTitle;
+      card.appendChild(titleEl);
+    }
+  }
+
+  if (bonus.dykText) {
+    const fact = document.createElement('p');
+    fact.className = 'px-4 pt-2 pb-3 text-sm text-ink leading-relaxed';
+    const prefix = document.createElement('span');
+    prefix.className = 'font-medium';
+    prefix.textContent = 'Did you know ';
+    fact.appendChild(prefix);
+    if (bonus.dykLink) {
+      const factLink = document.createElement('a');
+      factLink.href = bonus.dykLink;
+      factLink.target = '_blank';
+      factLink.rel = 'noopener noreferrer';
+      factLink.textContent = bonus.dykText;
+      fact.appendChild(factLink);
+    } else {
+      fact.appendChild(document.createTextNode(bonus.dykText));
+    }
+    card.appendChild(fact);
+  } else {
+    card.appendChild(Object.assign(document.createElement('div'), { className: 'pb-2' }));
+  }
+
+  return card;
 }
 
 function makePostCard(post: FeedPost, unblurred: boolean, auth: AuthState, onOpenPost: (post: FeedPost) => void, onOpenPeer: (account: FeedPost['account']) => void): HTMLElement {
