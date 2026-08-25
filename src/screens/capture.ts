@@ -590,12 +590,18 @@ export function renderCapture(
 
     let pinchStartDist = 0;
     let pinchStartZoom = 1;
+    // touch-action alone does not reliably stop iOS Safari's page pinch; the
+    // touchstart must be non-passive and prevented, and WebKit's proprietary
+    // gesture* events (fired even when touch handlers consume the touches)
+    // must be cancelled as well.
+    d.style.touchAction = 'none';
     d.addEventListener('touchstart', e => {
       if (e.touches.length === 2) {
+        e.preventDefault();
         pinchStartDist = touchDist(e.touches);
         pinchStartZoom = zoomMode === 'constraint' ? uiZoom : digitalZoom;
       }
-    }, { passive: true });
+    }, { passive: false });
     d.addEventListener('touchmove', e => {
       if (e.touches.length === 2 && pinchStartDist > 0) {
         e.preventDefault();
@@ -603,6 +609,9 @@ export function renderCapture(
       }
     }, { passive: false });
     d.addEventListener('touchend', () => { pinchStartDist = 0; });
+    for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) {
+      d.addEventListener(ev, e => e.preventDefault());
+    }
 
     openCamera(video, 'environment')
       .then(stream => {
