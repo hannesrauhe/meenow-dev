@@ -11,21 +11,54 @@ export type PhysicalAngle = 0 | 90 | 180 | 270;
 let sensorAngle: PhysicalAngle | null = null;
 let listeners = new Set<(angle: PhysicalAngle) => void>();
 let tracking = 0;
+let pendingAngle: PhysicalAngle | null = null;
+let pendingSince = 0;
 
-// Enter a new orientation only past 50°, keep it until clearly back below 40°
-// (dead zone between the thresholds) so the value does not flap around 45°.
+// Gravity must have at least this fraction of its magnitude in the screen
+// plane; below it (device near flat, e.g. shooting downward) the in-plane
+// direction is dominated by noise and the current angle is kept.
+const FLAT_LIMIT = 0.4;
+// Snap only within ±35° of a quadrant center; the 20° gaps between windows
+// act as the hysteresis dead zone.
+const SNAP_DEG = 35;
+// A new angle must persist this long before it is committed, so hand wobble
+// (e.g. during a pinch-to-zoom) cannot flip the orientation transiently.
+const STABLE_MS = 400;
+
+// Candidate angle from the gravity vector projected into the screen plane —
+// unlike raw beta/gamma thresholds this cannot mistake a forward tilt past
+// flat for a 180° rotation.
 function derive(beta: number, gamma: number, current: PhysicalAngle): PhysicalAngle {
-  if (gamma <= -50) return 90;
-  if (gamma >= 50) return 270;
-  if (beta <= -50) return 180;
-  if (Math.abs(gamma) < 40 && beta > -40) return 0;
+  const b = (beta * Math.PI) / 180;
+  const g = (gamma * Math.PI) / 180;
+  const px = -Math.cos(b) * Math.sin(g);
+  const py = -Math.sin(b);
+  if (Math.hypot(px, py) < FLAT_LIMIT) return current;
+  const a = (Math.atan2(px, -py) * 180 / Math.PI + 360) % 360;
+  for (const q of [0, 90, 180, 270] as const) {
+    const d = Math.abs(a - q);
+    if (Math.min(d, 360 - d) <= SNAP_DEG) return q;
+  }
   return current;
 }
 
 function onDeviceOrientation(e: DeviceOrientationEvent): void {
   if (e.beta == null || e.gamma == null) return;
   const next = derive(e.beta, e.gamma, sensorAngle ?? 0);
-  if (next !== sensorAngle) {
+  if (sensorAngle === null) {
+    sensorAngle = next;
+    listeners.forEach(cb => cb(next));
+    return;
+  }
+  if (next === sensorAngle) { pendingAngle = null; return; }
+  const now = Date.now();
+  if (next !== pendingAngle) {
+    pendingAngle = next;
+    pendingSince = now;
+    return;
+  }
+  if (now - pendingSince >= STABLE_MS) {
+    pendingAngle = null;
     sensorAngle = next;
     listeners.forEach(cb => cb(next));
   }
@@ -42,6 +75,7 @@ export function startOrientationTracking(): () => void {
     if (--tracking === 0) {
       window.removeEventListener('deviceorientation', onDeviceOrientation);
       sensorAngle = null;
+      pendingAngle = null;
       listeners.clear();
     }
   };
