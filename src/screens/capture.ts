@@ -18,6 +18,43 @@ type Step = 'start' | 'back' | 'switching' | 'front' | 'preview' | 'uploading' |
 
 let activeStreams: MediaStream[] = [];
 
+// The zoom constraint/capability/setting is not in TS's DOM lib yet.
+type ZoomRange = { min: number; max: number; step?: number };
+type ZoomCapabilities = MediaTrackCapabilities & { zoom?: ZoomRange };
+type ZoomSettings = MediaTrackSettings & { zoom?: number };
+type ZoomConstraintSet = MediaTrackConstraintSet & { zoom?: number };
+
+type BackLens = { deviceId: string; factor: number; label: string };
+
+// iOS Safari has no zoom constraint but exposes each physical back lens as a
+// separate device; classify by label (English on iOS regardless of locale) and
+// skip virtual multi-lens devices, which would duplicate the wide factor.
+async function detectBackLenses(): Promise<BackLens[]> {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const lenses = devices
+      .filter(dev => dev.kind === 'videoinput' && /back|rear/i.test(dev.label) && !/dual|triple/i.test(dev.label))
+      .map(dev => {
+        const l = dev.label.toLowerCase();
+        const factor = l.includes('ultra') ? 0.5 : l.includes('tele') ? 2 : 1;
+        return { deviceId: dev.deviceId, factor, label: dev.label };
+      });
+    if (new Set(lenses.map(l => l.factor)).size < 2) return [];
+    return lenses.sort((a, b) => a.factor - b.factor);
+  } catch {
+    return [];
+  }
+}
+
+function fmtZoom(f: number): string {
+  const r = Math.round(f * 10) / 10;
+  return `${r % 1 === 0 ? r.toFixed(0) : r.toFixed(1)}×`;
+}
+
+function touchDist(t: TouchList): number {
+  return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+}
+
 export function stopCaptureStreams(): void {
   activeStreams.forEach(s => s.getTracks().forEach(t => t.stop()));
   activeStreams = [];
@@ -26,9 +63,13 @@ export function stopCaptureStreams(): void {
 async function openCamera(
   video: HTMLVideoElement,
   facingMode: 'environment' | 'user',
+  deviceId?: string,
 ): Promise<MediaStream> {
+  const size = { width: { ideal: 3840 }, height: { ideal: 2160 } };
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: { ideal: facingMode }, width: { ideal: 3840 }, height: { ideal: 2160 } },
+    video: deviceId
+      ? { deviceId: { exact: deviceId }, ...size }
+      : { facingMode: { ideal: facingMode }, ...size },
     audio: false,
   });
   activeStreams.push(stream);
@@ -126,7 +167,7 @@ function positionShutter(btn: HTMLElement, baseClasses: string): void {
 // back to screen.orientation): with the OS rotation lock on the layout stays
 // portrait and the stream stays sensor-native, but a phone held sideways
 // should still produce an upright landscape photo.
-async function captureFrame(video: HTMLVideoElement): Promise<Blob> {
+async function captureFrame(video: HTMLVideoElement, cropFactor = 1): Promise<Blob> {
   const W = video.videoWidth;
   const H = video.videoHeight;
   const layoutPortrait = (screen.orientation?.type ?? '').startsWith('portrait');
@@ -152,7 +193,12 @@ async function captureFrame(video: HTMLVideoElement): Promise<Blob> {
   if (deg === 90) { ctx.translate(H, 0); ctx.rotate(Math.PI / 2); }
   else if (deg === 180) { ctx.translate(W, H); ctx.rotate(Math.PI); }
   else if (deg === 270) { ctx.translate(0, W); ctx.rotate(-Math.PI / 2); }
-  ctx.drawImage(video, 0, 0, W, H);
+  // Digital-zoom fallback: draw a centered crop scaled to the full canvas
+  // (centered, so it composes with the rotation above regardless of angle).
+  const f = Math.max(1, cropFactor);
+  const sw = W / f;
+  const sh = H / f;
+  ctx.drawImage(video, (W - sw) / 2, (H - sh) / 2, sw, sh, 0, 0, W, H);
 
   return new Promise((resolve, reject) =>
     canvas.toBlob(b => b ? resolve(b) : reject(new Error('Canvas toBlob failed')), 'image/jpeg', 0.92),
@@ -259,6 +305,9 @@ export function renderCapture(
   let coords: { lat: number; lon: number; alt?: number } | null = null;
   let saveBlob: Blob | null = null;
   let saveBlobKey = '';
+  // Residual digital crop applied at capture; 1 whenever the zoom is done by
+  // the camera itself (constraint mode) — reset each time the back step mounts.
+  let digitalZoom = 1;
 
   function exifKey(): string {
     return JSON.stringify([statusText.trim(), coords]);
@@ -384,9 +433,184 @@ export function renderCapture(
     btn.addEventListener('click', () => captureBack(video));
     d.appendChild(btn);
 
+    // --- Zoom: hardware constraint where supported, physical lens switching
+    // (iOS) otherwise, centered-crop digital as the last resort. ---
+    digitalZoom = 1;
+    let zoomMode: 'constraint' | 'lens' | 'digital' = 'digital';
+    let track: MediaStreamTrack | null = null;
+    let zoomRange: ZoomRange | null = null;
+    let zoomBaseline = 1; // capability units that correspond to the 1× preset
+    let uiZoom = 1; // constraint-mode multiplier relative to the baseline
+    let lenses: BackLens[] = [];
+    let currentLensId = '';
+    let switchingLens = false;
+    let baseTransform = '';
+
+    const zoomRow = document.createElement('div');
+    zoomRow.className = 'absolute left-1/2 -translate-x-1/2 bottom-[max(9.5rem,calc(env(safe-area-inset-bottom,0px)+8rem))] landscape:bottom-[max(1.5rem,calc(env(safe-area-inset-bottom,0px)+0.75rem))] flex gap-2';
+    d.appendChild(zoomRow);
+
+    const zoomIndicator = document.createElement('div');
+    zoomIndicator.className = 'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-white text-3xl font-semibold drop-shadow-lg pointer-events-none opacity-0 transition-opacity';
+    keepUpright(zoomIndicator);
+    d.appendChild(zoomIndicator);
+    let indicatorTimer = 0;
+    function flashIndicator(): void {
+      zoomIndicator.textContent = fmtZoom(displayZoom());
+      zoomIndicator.style.opacity = '1';
+      clearTimeout(indicatorTimer);
+      indicatorTimer = window.setTimeout(() => { zoomIndicator.style.opacity = '0'; }, 800);
+    }
+
+    function displayZoom(): number {
+      if (zoomMode === 'constraint') return uiZoom;
+      const lensFactor = lenses.find(l => l.deviceId === currentLensId)?.factor ?? 1;
+      return lensFactor * digitalZoom;
+    }
+
+    function pillClass(active: boolean): string {
+      return `w-9 h-9 rounded-full text-xs font-medium flex items-center justify-center ${
+        active ? 'bg-black/60 text-gold' : 'bg-black/30 text-white/80'
+      }`;
+    }
+
+    let pills: { value: number; el: HTMLButtonElement }[] = [];
+    function updateActivePill(): void {
+      if (!pills.length) return;
+      const cur = displayZoom();
+      let best = pills[0];
+      for (const p of pills) if (Math.abs(p.value - cur) < Math.abs(best.value - cur)) best = p;
+      pills.forEach(p => { p.el.className = pillClass(p === best); });
+    }
+
+    function buildPills(values: { value: number; onTap: () => void }[]): void {
+      zoomRow.innerHTML = '';
+      pills = values.map(({ value, onTap }) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = pillClass(false);
+        b.textContent = fmtZoom(value);
+        b.addEventListener('click', onTap);
+        keepUpright(b);
+        zoomRow.appendChild(b);
+        return { value, el: b };
+      });
+      updateActivePill();
+    }
+
+    function applyDigitalStyle(): void {
+      video.style.transform = digitalZoom > 1
+        ? `${baseTransform} scale(${digitalZoom})`.trim()
+        : baseTransform;
+    }
+
+    let applyTimer = 0;
+    function applyConstraintZoom(): void {
+      if (!track || !zoomRange) return;
+      const z = Math.min(zoomRange.max, Math.max(zoomRange.min, zoomBaseline * uiZoom));
+      const advanced: ZoomConstraintSet[] = [{ zoom: z }];
+      void track.applyConstraints({ advanced }).catch(() => {});
+    }
+
+    function setZoom(v: number): void {
+      if (zoomMode === 'constraint' && zoomRange) {
+        uiZoom = Math.min(zoomRange.max / zoomBaseline, Math.max(zoomRange.min / zoomBaseline, v));
+        // Throttle: a pinch fires many moves per second and applyConstraints
+        // round-trips into the camera pipeline.
+        if (!applyTimer) {
+          applyTimer = window.setTimeout(() => { applyTimer = 0; applyConstraintZoom(); }, 80);
+        }
+      } else {
+        digitalZoom = Math.min(3, Math.max(1, v));
+        applyDigitalStyle();
+      }
+      flashIndicator();
+      updateActivePill();
+    }
+
+    async function switchLens(lens: BackLens): Promise<void> {
+      if (switchingLens || lens.deviceId === currentLensId) return;
+      switchingLens = true;
+      try {
+        stopCaptureStreams();
+        video.removeAttribute('style');
+        const stream = await openCamera(video, 'environment', lens.deviceId);
+        if (cancelled() || !video.isConnected) return;
+        track = stream.getVideoTracks()[0] ?? null;
+        currentLensId = lens.deviceId;
+        digitalZoom = 1;
+        applyViewfinderTransform(video);
+        baseTransform = video.style.transform || '';
+        flashIndicator();
+        updateActivePill();
+      } catch (err) {
+        if (!cancelled()) show('error', cameraErrorMessage(err));
+      } finally {
+        switchingLens = false;
+      }
+    }
+
+    async function initZoom(stream: MediaStream): Promise<void> {
+      track = stream.getVideoTracks()[0] ?? null;
+      if (!track || cancelled()) return;
+      const caps = (track.getCapabilities?.() ?? {}) as ZoomCapabilities;
+      const zc = caps.zoom;
+      if (zc && typeof zc.min === 'number' && typeof zc.max === 'number' && zc.max > zc.min) {
+        zoomMode = 'constraint';
+        zoomRange = zc;
+        // Some devices report a range where the as-opened setting, not 1, is
+        // the neutral field of view — anchor the 1× preset there.
+        const s = track.getSettings() as ZoomSettings;
+        zoomBaseline = s.zoom && s.zoom >= zc.min && s.zoom <= zc.max
+          ? s.zoom
+          : Math.min(Math.max(1, zc.min), zc.max);
+        const uiMin = zc.min / zoomBaseline;
+        const uiMax = zc.max / zoomBaseline;
+        buildPills([
+          ...(uiMin < 0.95 ? [{ value: Math.max(uiMin, 0.5), onTap: () => setZoom(Math.max(uiMin, 0.5)) }] : []),
+          { value: 1, onTap: () => setZoom(1) },
+          ...(uiMax >= 2 ? [{ value: 2, onTap: () => setZoom(2) }] : []),
+        ]);
+      } else {
+        currentLensId = track.getSettings().deviceId ?? '';
+        lenses = await detectBackLenses();
+        if (cancelled()) return;
+        if (lenses.length >= 2) {
+          zoomMode = 'lens';
+          buildPills(lenses.map(l => ({ value: l.factor, onTap: () => void switchLens(l) })));
+        } else {
+          zoomMode = 'digital';
+          buildPills([
+            { value: 1, onTap: () => setZoom(1) },
+            { value: 2, onTap: () => setZoom(2) },
+          ]);
+        }
+      }
+    }
+
+    let pinchStartDist = 0;
+    let pinchStartZoom = 1;
+    d.addEventListener('touchstart', e => {
+      if (e.touches.length === 2) {
+        pinchStartDist = touchDist(e.touches);
+        pinchStartZoom = zoomMode === 'constraint' ? uiZoom : digitalZoom;
+      }
+    }, { passive: true });
+    d.addEventListener('touchmove', e => {
+      if (e.touches.length === 2 && pinchStartDist > 0) {
+        e.preventDefault();
+        setZoom(pinchStartZoom * (touchDist(e.touches) / pinchStartDist));
+      }
+    }, { passive: false });
+    d.addEventListener('touchend', () => { pinchStartDist = 0; });
+
     openCamera(video, 'environment')
-      .then(() => applyViewfinderTransform(video))
-      .catch(err => show('error', cameraErrorMessage(err)));
+      .then(stream => {
+        applyViewfinderTransform(video);
+        baseTransform = video.style.transform || '';
+        return initZoom(stream);
+      })
+      .catch(err => { if (!cancelled()) show('error', cameraErrorMessage(err)); });
     return d;
   }
 
@@ -396,7 +620,7 @@ export function renderCapture(
 
   async function captureBack(video: HTMLVideoElement): Promise<void> {
     captureDate = new Date();
-    backBlob = await captureFrame(video).catch(() => null);
+    backBlob = await captureFrame(video, digitalZoom).catch(() => null);
     if (cancelled()) return;
     if (!backBlob) { show('error', 'Failed to capture.'); return; }
     stopCaptureStreams();
