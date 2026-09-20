@@ -10,7 +10,9 @@ Users receive a daily prompt at a pseudo-random local time (between 9 AM and 9 P
 
 **Who can see your photos?** meenow posts with followers-only visibility. Your followers on Pixelfed (or any connected Mastodon-compatible instance) will be able to see each photo in their home feed.
 
-**Automatic archiving on Pixelfed:** After the next daily trigger fires, meenow automatically archives your older posts using the Pixelfed archive API. Archived posts are hidden from your followers but remain visible to you in your Pixelfed archive and in meenow's own grid view (My Photos). This archiving does not apply on standard Mastodon instances, where posts remain visible to followers indefinitely.
+**Home instance:** meenow's community lives on **pixelfed.social** — the login screen connects there with one tap. This is a deliberate design choice: the daily-vanish behaviour below relies on posts being *local* to the instance, so keeping the whole meenow circle on one instance is what makes it work.
+
+**Automatic archiving on Pixelfed:** After the next daily trigger fires, meenow automatically archives your older posts using the Pixelfed archive API. Archived posts are hidden from your followers but remain visible to you in your Pixelfed archive and in meenow's own grid view (My Photos). Archiving is a **local** visibility change: copies already delivered to followers on *other* instances are not retracted and stay visible there. Keeping your meenow circle on pixelfed.social is what makes photos truly vanish.
 
 **Recommendation:** Use a Pixelfed account with restricted followers (i.e. approve follower requests) so that you control who can see your daily photos before they are archived.
 
@@ -97,7 +99,7 @@ Standard Web Push (VAPID), with no backend. A GitHub Actions cron job (`scripts/
 
 - **Push notifications on iOS:** Web Push requires the PWA to be installed to the home screen (iOS 16.4+). The install nudge directly addresses this.
 - **Camera resolution:** Controlled by the browser, typically lower than the native camera app.
-- **Instance compatibility:** Designed and tested against Pixelfed. Standard Mastodon instances expose the same API surface and are expected to work.
+- **Instance compatibility:** meenow is designed for its home instance, pixelfed.social. Other instances can be connected via the manual field on the login screen but are unsupported: archiving cannot retract posts from followers on other instances, and some public instances send no CORS headers at all, which makes browser-based access impossible. Standard Mastodon instances expose the same API surface but have no archive feature, so photos never vanish.
 
 ---
 

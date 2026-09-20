@@ -1,8 +1,9 @@
 // Login screen: a short onboarding wizard that introduces meenow and Pixelfed,
-// recommends installing the PWA, then collects an instance and starts OAuth PKCE.
+// recommends installing the PWA, then connects the home instance via OAuth PKCE.
 import { startOAuthFlow } from '../api/auth';
 import { isPwaInstalled, isIOS } from '../state';
 import { canPromptInstall, promptInstall } from '../components/installNudge';
+import { HOME_INSTANCE } from '../config';
 
 interface IntroStep {
   title: string;
@@ -15,9 +16,9 @@ type Step =
   | { kind: 'install' }
   | { kind: 'connect' };
 
-// One-tap instance suggestions (see plan / issue #58 discussion). pixelfed.org
-// is the project homepage, not a sign-up instance, so it stays an info link.
-const SUGGESTED_INSTANCES = ['pixelfed.de', 'pixelfed.social'];
+// meenow's community lives on HOME_INSTANCE (see src/config.ts): the vanish
+// promise only holds where posts are local, and several public instances send
+// no CORS headers at all. A manual field stays as an unsupported escape hatch.
 
 const INTRO_STEPS: IntroStep[] = [
   {
@@ -33,10 +34,9 @@ const INTRO_STEPS: IntroStep[] = [
     title: `<h2 class="text-2xl font-semibold text-ink">Built on Pixelfed</h2>`,
     body: `<p class="text-ink/70">meenow has no server of its own. Your photos are stored on
             <strong>Pixelfed</strong>, an open photo-sharing network.</p>
-           <p class="text-ink/50">Pixelfed is <strong>federated</strong>, much like email: no single
-            company owns it. Many independent servers — called <em>instances</em> — run the same
-            software and talk to each other. You keep your account on one instance and can still
-            follow people on any other.</p>`,
+           <p class="text-ink/50">meenow lives on <strong>${HOME_INSTANCE}</strong>, one of many
+            independent Pixelfed servers. Everyone in your meenow circle lives there too, so
+            photos can truly disappear after a day — a promise no other setup can keep.</p>`,
     next: 'Next',
   },
   {
@@ -168,25 +168,22 @@ export function renderLogin(): HTMLElement {
     wrap.className = 'w-full max-w-xs flex flex-col gap-5';
     wrap.innerHTML = `
       <div class="text-center space-y-2">
-        <h2 class="text-2xl font-semibold text-ink">Choose your instance</h2>
+        <h2 class="text-2xl font-semibold text-ink">Connect your account</h2>
         <p class="text-sm text-ink/60 leading-relaxed">
-          You need a Pixelfed account to continue. If you do not have one yet, create it on any
-          instance first, then come back.
+          meenow runs on <strong>${HOME_INSTANCE}</strong>. You need a Pixelfed account there —
+          if you do not have one yet, create it first, then come back.
         </p>
-        <a href="https://pixelfed.org" target="_blank" rel="noopener noreferrer"
-           class="inline-block text-xs text-gold underline underline-offset-2">Find a Pixelfed instance →</a>
+        <a href="https://${HOME_INSTANCE}/auth/sign_up" target="_blank" rel="noopener noreferrer"
+           class="inline-block text-xs text-gold underline underline-offset-2">Create a ${HOME_INSTANCE} account →</a>
       </div>
 
       <div class="w-full space-y-2.5">
-        ${SUGGESTED_INSTANCES.map(
-          (name) => `
-          <button data-instance="${name}" class="instance-pick w-full flex items-center justify-between
-                   bg-cream border border-ink/15 rounded-xl px-4 py-3 text-left
-                   active:scale-[.99] transition-transform hover:border-gold">
-            <span class="font-medium text-ink">${name}</span>
-            <span class="text-xs text-ink/40">Connect →</span>
-          </button>`,
-        ).join('')}
+        <button data-instance="${HOME_INSTANCE}" class="instance-pick w-full flex items-center justify-between
+                 bg-cream border border-ink/15 rounded-xl px-4 py-3 text-left
+                 active:scale-[.99] transition-transform hover:border-gold">
+          <span class="font-medium text-ink">${HOME_INSTANCE}</span>
+          <span class="text-xs text-ink/40">Connect →</span>
+        </button>
       </div>
 
       <p id="login-error" class="text-xs text-red-500 hidden text-center"></p>
@@ -213,8 +210,8 @@ export function renderLogin(): HTMLElement {
       </div>
 
       <p class="text-xs text-ink/40 text-center leading-relaxed">
-        Mastodon accounts also work but are not recommended — follower management and archiving
-        behave differently.
+        Other instances are unsupported: photos may not vanish for your followers, and some
+        instances block browser apps entirely.
       </p>
 
       <div class="flex items-center justify-center gap-1.5">${dots()}</div>

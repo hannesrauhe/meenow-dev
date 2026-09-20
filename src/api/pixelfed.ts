@@ -195,6 +195,43 @@ function isNewerId(a: string, b: string): boolean {
 
 // --- Feed ---
 
+// Distinguishes why a feed load failed. A CORS-blocked fetch rejects with a bare
+// TypeError (no status/header is readable by design) — but so does being offline.
+// The discriminator: a `mode: 'no-cors'` GET is a *simple* request (no preflight,
+// no Authorization header), so it resolves with an opaque response whenever the
+// server is reachable at all. If the probe resolves, the network is fine and the
+// original TypeError was the CORS preflight; if it rejects too, the host is
+// unreachable. HTTP errors (401/403/5xx) never reach this path — they throw a
+// plain Error carrying the status.
+export type FeedErrorKind = 'cors' | 'offline' | 'http';
+
+// A WAF that blocks even simple GETs misclassifies as 'offline' — acceptable:
+// the card still offers Retry. The verdict is cached so hammering Retry does not
+// re-probe on every click.
+const PROBE_TTL_MS = 60_000;
+let _probe: { url: string; at: number; kind: 'cors' | 'offline' } | null = null;
+
+export async function classifyFeedError(err: unknown, probeUrl: string): Promise<FeedErrorKind> {
+  if (!(err instanceof TypeError) || !probeUrl) return 'http';
+  if (_probe && _probe.url === probeUrl && Date.now() - _probe.at < PROBE_TTL_MS) return _probe.kind;
+  let kind: 'cors' | 'offline';
+  try {
+    await fetch(probeUrl, { mode: 'no-cors', cache: 'no-store' });
+    kind = 'cors';
+  } catch {
+    kind = 'offline';
+  }
+  _probe = { url: probeUrl, at: Date.now(), kind };
+  return kind;
+}
+
+// The URL of the last failed home-timeline request, so the feed screen can probe
+// the exact endpoint that failed. Set on every transport-level rejection.
+let _lastFeedUrl = '';
+export function getLastFeedUrl(): string {
+  return _lastFeedUrl;
+}
+
 // Session-level home timeline cache. The first call does a full fetch; subsequent
 // calls within HOME_CACHE_TTL_MS return the cached data directly. After the TTL,
 // an incremental fetch with since_id is attempted; incoming posts are deduplicated
@@ -223,6 +260,7 @@ function fetchHomeTimeline(auth: AuthState, force = false): Promise<MastodonStat
   // no-store: the full-page URL is identical on every launch, so a stale HTTP
   // cache hit would render an old snapshot missing the newest posts (the user's
   // own post first among them, which also re-blurs the feed via the count).
+  _lastFeedUrl = url;
   _homePending = fetch(url, { headers: { Authorization: `Bearer ${auth.accessToken}` }, cache: 'no-store' })
     .then(r => {
       // A failed fetch must reject, not resolve empty: an empty result would be

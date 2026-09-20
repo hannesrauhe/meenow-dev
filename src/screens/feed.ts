@@ -2,7 +2,8 @@
 import { SLEEPING_CAT, SPEECH_BUBBLE_ICON, GRID_ICON, PEOPLE_ICON } from '../icons';
 import { clearAuth, getAuthState, type AuthState } from '../api/auth';
 import { MAX_POSTS_PER_TRIGGER } from '../state';
-import { fetchMeenowFeed, type FeedPost } from '../api/pixelfed';
+import { fetchMeenowFeed, classifyFeedError, getLastFeedUrl, type FeedErrorKind, type FeedPost } from '../api/pixelfed';
+import { HOME_INSTANCE } from '../config';
 import { fetchDailyBonus, type DailyBonus } from '../api/dailyBonus';
 import { fetchXkcdBonus, comicUrl, type XkcdBonus } from '../api/xkcd';
 import { fetchPendingRequestCount } from '../api/social';
@@ -213,15 +214,11 @@ async function loadFeed(container: HTMLElement, auth: AuthState, postCount: numb
   let posts: FeedPost[];
   try {
     posts = await fetchMeenowFeed(auth, force);
-  } catch {
+  } catch (err) {
     if (silent) return;
-    container.innerHTML = `
-      <div class="flex flex-col items-center py-16 gap-3 text-center px-6">
-        <p class="text-sm text-ink/50">Could not load the feed.</p>
-        <button id="btn-feed-retry" class="text-sm text-gold underline underline-offset-2">Retry</button>
-      </div>
-    `;
-    container.querySelector('#btn-feed-retry')?.addEventListener('click', () => loadFeed(container, auth, postCount, onOpenPost, onOpenPeer, onPostCountChange));
+    const kind = await classifyFeedError(err, getLastFeedUrl());
+    if (!container.isConnected) return;
+    renderFeedError(container, kind, auth, () => loadFeed(container, auth, postCount, onOpenPost, onOpenPeer, onPostCountChange));
     return;
   }
 
@@ -483,4 +480,40 @@ function makePostCard(post: FeedPost, unblurred: boolean, auth: AuthState, onOpe
   }
 
   return card;
+}
+
+// Error card for a failed feed load. `cors` means the instance rejected
+// meenow's cross-origin requests (a server-side config issue the user cannot
+// fix) — off-home users get a one-tap switch to the home instance, which
+// disconnects and lands on the login screen. On the home instance there is
+// nothing to switch to, so only Retry is offered.
+function renderFeedError(container: HTMLElement, kind: FeedErrorKind, auth: AuthState, retry: () => void): void {
+  let body: string;
+  let switchBtn = '';
+  if (kind === 'cors') {
+    body = `<p class="text-sm text-ink/70">${escapeHtml(auth.instance)} is blocking meenow's connection.</p>`;
+    if (auth.instance !== HOME_INSTANCE) {
+      body += `<p class="text-sm text-ink/50">meenow works best on <strong>${HOME_INSTANCE}</strong> — that's where your friends are, and where photos truly vanish after a day.</p>`;
+      switchBtn = `<button id="btn-feed-switch" class="btn-primary">Switch to ${HOME_INSTANCE}</button>`;
+    }
+  } else if (kind === 'offline') {
+    body = `<p class="text-sm text-ink/50">You appear to be offline.</p>`;
+  } else {
+    body = `<p class="text-sm text-ink/50">Could not load the feed.</p>`;
+  }
+  container.innerHTML = `
+    <div class="flex flex-col items-center py-16 gap-3 text-center px-6">
+      ${body}
+      ${switchBtn}
+      <button id="btn-feed-retry" class="text-sm text-gold underline underline-offset-2">Retry</button>
+    </div>
+  `;
+  container.querySelector('#btn-feed-retry')?.addEventListener('click', retry);
+  container.querySelector('#btn-feed-switch')?.addEventListener('click', () => { clearAuth(); window.location.reload(); });
+}
+
+function escapeHtml(s: string): string {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
 }
