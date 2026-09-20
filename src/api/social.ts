@@ -213,14 +213,26 @@ export async function fetchMyAccount(auth: AuthState): Promise<{ id: string; acc
 }
 
 export async function setAccountLocked(auth: AuthState, locked: boolean): Promise<boolean> {
-  const form = new FormData();
-  form.append('locked', String(locked));
+  // Must be urlencoded, not FormData: PHP only parses multipart bodies on POST,
+  // so a multipart PATCH is silently ignored — Pixelfed answers 200 with the
+  // unchanged profile. URLSearchParams makes fetch send an urlencoded body,
+  // which PATCH does parse. (Verified live against pixelfed.social.)
+  const body = new URLSearchParams({ locked: String(locked) });
   const res = await fetch(`https://${auth.instance}/api/v1/accounts/update_credentials`, {
     method: 'PATCH',
     headers: authHeaders(auth),
-    body: form,
+    body,
   });
-  return res.ok;
+  if (!res.ok) return false;
+  // Pixelfed can answer 200 with an unchanged profile (that silent-ignore is
+  // exactly what the urlencoded body above avoids), so trust the echoed
+  // state rather than the status code alone.
+  try {
+    const data = await res.json() as { locked?: boolean };
+    return data.locked === locked;
+  } catch {
+    return false;
+  }
 }
 
 // --- One-tap mutual helpers (single shared path for every entry point) ---
