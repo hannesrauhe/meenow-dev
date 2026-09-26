@@ -455,7 +455,7 @@ async function init(): Promise<void> {
   // Re-subscribe if the VAPID key was rotated or if the subscription was created
   // in a browser tab and needs to be re-created in the installed PWA context.
   // The tz sync runs after: a fresh re-subscribe already writes the timezone,
-  // and running both concurrently would race on the subscription filename.
+  // and running both concurrently would race on the same subscription.
   void resubscribeIfNeeded().then(() => syncSubscriptionTz());
 
   // Opening the app answers the daily-reminder badge regardless of posting.

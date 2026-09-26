@@ -1,8 +1,8 @@
 # meenow
 
-A decentralized, serverless, cat-themed spontaneous photo-sharing PWA for Pixelfed - hosted on meenow.de.
+A decentralized, cat-themed spontaneous photo-sharing PWA for Pixelfed - hosted on meenow.de.
 
-Users receive a daily prompt at a pseudo-random local time (between 9 AM and 9 PM) to take a dual-camera photo — back camera for surroundings, front camera for a selfie — stitched into one composite image and shared with friends via the Fediverse. No custom backend or database: the Pixelfed/Mastodon API is the entire backend.
+Users receive a daily prompt at a pseudo-random local time (between 9 AM and 9 PM) to take a dual-camera photo — back camera for surroundings, front camera for a selfie — stitched into one composite image and shared with friends via the Fediverse. The Pixelfed/Mastodon API is the entire data backend; a thin PHP component (`server/`) proxies it same-origin (CORS) and sends Web Push notifications.
 
 ---
 
@@ -27,14 +27,20 @@ Users receive a daily prompt at a pseudo-random local time (between 9 AM and 9 P
    └───────────┬────────────────────────┬───────────┘
                │                                │
                ▼                                ▼
-   [ LocalStorage ]                   [ Pixelfed API Engine ]
-   • OAuth credentials + tokens       • Dynamic OAuth registration
-   • Install-nudge dismiss flag       • Token management (PKCE)
+   [ LocalStorage ]                   [ PHP backend (server/) ]
+   • OAuth credentials + tokens       • same-origin /api proxy → Pixelfed
+   • Install-nudge dismiss flag       • /push/* subscription store (MySQL)
+                                      • /xkcd.json cached mirror
+                                      • URL-cron: daily tick
+                                                │
+                                                ▼
+                                      [ pixelfed.social ]
+                                      • Dynamic OAuth registration
                                       • Post with #meenowApp
                                       • Feed filter + blur logic
 ```
 
-**Hosting:** Static only — GitHub Pages.
+**Hosting:** any PHP + MySQL shared host — the PWA build and the PHP backend share one origin (meenow.de), so the browser never makes cross-origin Pixelfed calls. Deploys are pull-based: GitHub Actions builds a release tarball, `install.sh` on the server installs it.
 **Platform targets:** Android and iOS mobile browsers are first-class. Desktop browsers are supported but deprioritized in UX design.
 **Tech stack:** Vite + Vanilla TypeScript + Tailwind CSS. No framework runtime.
 
@@ -91,7 +97,7 @@ No hardcoded `client_id` or `client_secret`. On first use with a given instance:
 
 ### Push Notifications
 
-Standard Web Push (VAPID), with no backend. A GitHub Actions cron job (`scripts/send-tick.mjs` + `.github/workflows/send-tick.yml`) sends a generic tick to every stored subscription every 30 minutes during a daytime UTC window and prunes expired endpoints. Subscriptions are stored in a separate relay repository, written directly from the client. All scheduling logic stays client-side: the service worker shows a notification on each tick until the user has posted in the current trigger period (state shared with the SW via IndexedDB). Once the user has posted, otherwise-silent ticks are turned into engagement digests ("3 likes · 1 reply on your meenow"). See `CLAUDE.md` for the full push architecture.
+Standard Web Push (VAPID). The PHP backend stores subscriptions in MySQL (`POST /push/subscribe` from the client) and a key-gated URL-cron (every 30 min) sends a generic tick to every subscription, gated per device to its local trigger window, pruning expired endpoints. All scheduling logic stays client-side: the service worker shows a notification on each tick until the user has posted in the current trigger period (state shared with the SW via IndexedDB). Once the user has posted, otherwise-silent ticks are turned into engagement digests ("3 likes · 1 reply on your meenow"). See `CLAUDE.md` for the full push architecture and `server/README.md` for the backend.
 
 ---
 
@@ -99,7 +105,7 @@ Standard Web Push (VAPID), with no backend. A GitHub Actions cron job (`scripts/
 
 - **Push notifications on iOS:** Web Push requires the PWA to be installed to the home screen (iOS 16.4+). The install nudge directly addresses this.
 - **Camera resolution:** Controlled by the browser, typically lower than the native camera app.
-- **Instance compatibility:** meenow is designed for its home instance, pixelfed.social. Other instances can be connected via the manual field on the login screen but are unsupported: archiving cannot retract posts from followers on other instances, and some public instances send no CORS headers at all, which makes browser-based access impossible. Standard Mastodon instances expose the same API surface but have no archive feature, so photos never vanish.
+- **Instance compatibility:** meenow is designed for its home instance, pixelfed.social, which the backend proxies. Other instances can be connected via the manual field on the login screen but are unsupported: archiving cannot retract posts from followers on other instances, and some public instances send no CORS headers at all, which makes direct browser access impossible. Standard Mastodon instances expose the same API surface but have no archive feature, so photos never vanish.
 
 ---
 
@@ -110,4 +116,6 @@ npm install
 npm run dev
 ```
 
-Deployed automatically to GitHub Pages on every push to any branch via GitHub Actions (`.github/workflows/deploy.yml`). The dev repo (`dev.meenow.de`) deploys immediately; the production repo (`meenow.de`) uses the same workflow but pauses for manual approval via the `github-pages` environment protection rule. See `CLAUDE.md` for the two-repo deployment details.
+The dev server proxies `/api`, `/push`, `/xkcd.json` to a local PHP backend: run `php -S localhost:8080 server/scripts/router.php` alongside (setup in `server/README.md`).
+
+Deployment is pull-based: `.github/workflows/release.yml` builds the PWA and packages a tarball (tags → releases; `main` and PRs → a rolling `preview` prerelease). On the hosting machine, `./install.sh` (or `--pr N`, `--ref main`, `--rollback`) downloads it, merges into the instance dir, runs `composer install --no-dev` and the smoke test. `meenow.de` and `dev.meenow.de` are two such instance dirs; see `server/README.md`.

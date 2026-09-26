@@ -1,5 +1,5 @@
 // Deterministic daily trigger time using djb2 hash + xorshift32 PRNG seeded by local date.
-// The pure math lives in trigger-core.mjs, shared with scripts/send-tick.mjs.
+// The pure math lives in trigger-core.mjs, ported to PHP in server/src/Trigger.php.
 //
 // Terminology used throughout this codebase:
 //   trigger time      – the pseudo-random moment within a day when users are prompted to post.

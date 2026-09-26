@@ -1,0 +1,100 @@
+# Builds the PWA and packages a server-ready tarball (dist/ + server/ +
+# install.sh, WITHOUT vendor/ — composer runs on the hosting machine).
+# Channels, all as release assets on github.com (anonymously downloadable):
+#   tag v*      -> release v1.2.3: meenow-v1.2.3.tar.gz + install.sh
+#   push main   -> rolling "preview" prerelease: meenow-preview-main.tar.gz
+#   PR          -> same preview release: meenow-preview-pr-<N>.tar.gz
+# On the server: ./install.sh | --pr N | --ref main | v1.2.3 | --rollback
+# (PRs from forks cannot upload — same-repo branches only.)
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+    branches: ['main']
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
+
+      - id: vars
+        run: |
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            V=${GITHUB_REF#refs/tags/}
+            echo "version=$V"      >> "$GITHUB_OUTPUT"
+            echo "asset=meenow-$V.tar.gz" >> "$GITHUB_OUTPUT"
+            echo "release=$V"      >> "$GITHUB_OUTPUT"
+          elif [[ $GITHUB_REF == refs/heads/main ]]; then
+            echo "version=main-${GITHUB_SHA::7}"            >> "$GITHUB_OUTPUT"
+            echo "asset=meenow-preview-main.tar.gz"         >> "$GITHUB_OUTPUT"
+            echo "release=preview"                          >> "$GITHUB_OUTPUT"
+          else
+            N=${{ github.event.pull_request.number }}
+            echo "version=pr-$N-${GITHUB_SHA::7}"           >> "$GITHUB_OUTPUT"
+            echo "asset=meenow-preview-pr-$N.tar.gz"        >> "$GITHUB_OUTPUT"
+            echo "release=preview"                          >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package
+        run: |
+          # Instance layout: server/ at the root, PWA build under public/.
+          mkdir out
+          cp -r server/. out/
+          mkdir -p out/public
+          cp -r dist/. out/public/
+          cp install.sh out/
+          chmod +x out/install.sh
+          echo "${{ steps.vars.outputs.version }}" > out/VERSION
+          tar -czf "${{ steps.vars.outputs.asset }}" -C out .
+
+      - name: Publish stable release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          gh release create "${{ steps.vars.outputs.version }}" \
+            "${{ steps.vars.outputs.asset }}" install.sh \
+            --title "${{ steps.vars.outputs.version }}" \
+            --notes "See commits for changes."
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Publish preview build
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          gh release create preview --prerelease \
+            --title "preview builds (main + PRs)" \
+            --notes "Rolling builds: ./install.sh --ref main or --pr N. Not for production." \
+            || true
+          gh release upload preview "${{ steps.vars.outputs.asset }}" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  cleanup:
+    # Drop a closed PR's preview asset so the rolling release doesn't pile up.
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete preview asset
+        run: |
+          N=${{ github.event.pull_request.number }}
+          ID=$(gh api "repos/$GITHUB_REPOSITORY/releases/preview/assets" \
+                 --jq ".[] | select(.name==\"meenow-preview-pr-$N.tar.gz\") | .id" || true)
+          [ -n "$ID" ] && gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$ID" || true
+        env:
+          GH_TOKEN: ${{ github.token }}
