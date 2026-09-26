@@ -1,0 +1,13 @@
+{
+    "name": "meenow/server",
+    "description": "meenow server: Pixelfed API proxy + Web Push sender",
+    "require": {
+        "php": ">=8.1",
+        "minishlink/web-push": "^8.0"
+    },
+    "config": {
+        "platform": {
+            "php": "8.3.33"
+        }
+    }
+}

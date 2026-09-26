@@ -321,8 +321,8 @@ function makeBonusCard(bonus: DailyBonus): HTMLElement {
   return card;
 }
 
-// All XkcdBonus fields were validated in fetchXkcdBonus (the mirror file is
-// world-writable via the relay token); text still only goes through textContent.
+// All XkcdBonus fields were validated in fetchXkcdBonus; text still only goes
+// through textContent.
 function makeXkcdCard(bonus: XkcdBonus): HTMLElement {
   const card = document.createElement('article');
   card.className = 'border-b border-t border-ink/8';

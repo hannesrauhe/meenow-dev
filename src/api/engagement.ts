@@ -1,6 +1,7 @@
 // SW-safe Pixelfed reads used by the push handler to build post-posting digests.
 // Pure fetch only — no DOM or localStorage — so it can run inside the service worker.
 import { getLastTriggerTime } from '../timer';
+import { apiBase } from '../config';
 import type { StoredAuth } from '../idb';
 
 interface NotifStatus {
@@ -38,7 +39,7 @@ export async function fetchNewEngagement(auth: StoredAuth, sinceId?: string): Pr
   const params = new URLSearchParams({ limit: '40' });
   if (sinceId) params.set('since_id', sinceId);
   try {
-    const res = await fetch(`https://${auth.instance}/api/v1/notifications?${params}`, {
+    const res = await fetch(`${apiBase(auth.instance)}/api/v1/notifications?${params}`, {
       headers: { Authorization: `Bearer ${auth.accessToken}` },
     });
     if (!res.ok) return empty;
@@ -66,7 +67,7 @@ export async function fetchFriendsPostedCount(auth: StoredAuth): Promise<number>
   try {
     // no-store keeps this SW-side fetch from reading or repopulating the HTTP
     // cache entry for the same URL the app's feed load uses.
-    const res = await fetch(`https://${auth.instance}/api/v1/timelines/home?limit=40`, {
+    const res = await fetch(`${apiBase(auth.instance)}/api/v1/timelines/home?limit=40`, {
       headers: { Authorization: `Bearer ${auth.accessToken}` },
       cache: 'no-store',
     });

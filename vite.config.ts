@@ -5,25 +5,24 @@ import { execSync } from 'child_process';
 let GIT_HASH = 'unknown';
 try { GIT_HASH = execSync('git rev-parse --short HEAD').toString().trim(); } catch { /* no git */ }
 
-const REQUIRED_ENV = [
-  'VITE_VAPID_PUBLIC_KEY',
-  'VITE_PUSH_RELAY_TOKEN',
-  'VITE_PUSH_SUBS_PATH',
-] as const;
+// Local dev against the PHP backend: run `php -S localhost:8080
+// server/scripts/router.php` (from the repo root, needs server/vendor +
+// server/config) and these paths get proxied like production's .htaccess does.
+const PHP_BACKEND = 'http://localhost:8080';
 
-export default defineConfig(({ command }) => {
-  // Only enforce push config in CI — local builds can omit it (push features degrade gracefully).
-  if (command === 'build' && process.env.CI === 'true') {
-    const missing = REQUIRED_ENV.filter(key => !process.env[key]);
-    if (missing.length > 0) {
-      throw new Error(`Missing required environment variables:\n${missing.map(k => `  ${k}`).join('\n')}`);
-    }
-  }
-
-  return {
-    define: {
-      __GIT_HASH__: JSON.stringify(GIT_HASH),
+export default defineConfig(() => ({
+  define: {
+    __GIT_HASH__: JSON.stringify(GIT_HASH),
+  },
+  server: {
+    proxy: {
+      '/api': PHP_BACKEND,
+      '/oauth/token': PHP_BACKEND,
+      '/push': PHP_BACKEND,
+      '/xkcd.json': PHP_BACKEND,
+      '/health': PHP_BACKEND,
     },
+  },
     plugins: [
       VitePWA({
         registerType: 'prompt',
@@ -56,5 +55,4 @@ export default defineConfig(({ command }) => {
         },
       }),
     ],
-  };
-});
+}));

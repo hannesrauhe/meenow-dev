@@ -1,6 +1,8 @@
 // Pure trigger-time math shared between the app (src/timer.ts, via Vite) and the
-// push relay script (scripts/send-tick.mjs, via Node). Plain ESM + JSDoc so both
-// sides consume the same implementation — no environment-specific APIs beyond Intl.
+// push backend (server/src/Trigger.php, a hand-maintained PHP port verified by
+// server/scripts/parity-test.{php,mjs}). Plain ESM + JSDoc so the app and any
+// Node tooling consume the same implementation — no environment-specific APIs
+// beyond Intl.
 
 export const WINDOW_START_HOUR = 9;      // 9:00 AM local
 export const WINDOW_MINUTES = 12 * 60;   // 9:00 AM – 9:00 PM = 720 min

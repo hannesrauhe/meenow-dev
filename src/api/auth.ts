@@ -1,5 +1,6 @@
 // OAuth PKCE auth: client registration, login flow, token/accountId storage, and auth state helpers.
-import { clearPushSubFilename, clearLockedApplied, clearPendingAdd } from '../state';
+import { clearLockedApplied, clearPendingAdd } from '../state';
+import { apiBase } from '../config';
 import { idbDelete, IDB_KEYS } from '../idb';
 
 const PREFIX = 'meenow:auth:';
@@ -45,7 +46,7 @@ async function ensureAppRegistered(instance: string): Promise<{ clientId: string
     if (creds.scopes === OAUTH_SCOPES) return { clientId: creds.clientId, clientSecret: creds.clientSecret };
   }
 
-  const res = await fetch(`https://${instance}/api/v1/apps`, {
+  const res = await fetch(`${apiBase(instance)}/api/v1/apps`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -79,6 +80,9 @@ export async function startOAuthFlow(instance: string): Promise<void> {
     code_challenge: challenge,
     code_challenge_method: 'S256',
   });
+  // Top-level browser navigation to the instance's login page — not subject to
+  // CORS, so it always goes direct even for the proxied home instance. The
+  // redirect_uri stays our own origin, so the code lands back on meenow.de.
   window.location.href = `https://${instance}/oauth/authorize?${params}`;
 }
 
@@ -89,7 +93,7 @@ export async function handleOAuthCallback(code: string): Promise<void> {
 
   const creds = await ensureAppRegistered(instance);
 
-  const tokenRes = await fetch(`https://${instance}/oauth/token`, {
+  const tokenRes = await fetch(`${apiBase(instance)}/oauth/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -109,7 +113,7 @@ export async function handleOAuthCallback(code: string): Promise<void> {
   localStorage.setItem(key(instance, 'token-scopes'), OAUTH_SCOPES);
   localStorage.setItem(`${PREFIX}instance`, instance);
 
-  const meRes = await fetch(`https://${instance}/api/v1/accounts/verify_credentials`, {
+  const meRes = await fetch(`${apiBase(instance)}/api/v1/accounts/verify_credentials`, {
     headers: { Authorization: `Bearer ${access_token}` },
   });
   if (!meRes.ok) throw new Error('Could not verify credentials');
@@ -156,7 +160,6 @@ export function clearAuth(): void {
   localStorage.removeItem(`${PREFIX}pending-instance`);
   localStorage.removeItem(`${PREFIX}verifier`);
   clearPendingAdd();
-  clearPushSubFilename();
   localStorage.removeItem('meenow:pwa-subbed');
   // Drop the SW's mirrored auth and engagement-digest state.
   void idbDelete(IDB_KEYS.auth);

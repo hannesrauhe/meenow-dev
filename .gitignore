@@ -3,3 +3,9 @@ dist/
 .vite/
 *.local
 package-lock.json
+
+# PHP server (see server/)
+server/vendor/
+server/config/config.php
+server/config/vapid.json
+server/cache/
