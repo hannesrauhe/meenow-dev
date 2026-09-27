@@ -1,6 +1,7 @@
 // Feed screen: main home feed showing today's meenow posts from followed accounts.
 import { SLEEPING_CAT, SPEECH_BUBBLE_ICON, GRID_ICON, PEOPLE_ICON } from '../icons';
 import { clearAuth, getAuthState, type AuthState } from '../api/auth';
+import { disableNotifications } from '../notifications';
 import { MAX_POSTS_PER_TRIGGER } from '../state';
 import { fetchMeenowFeed, classifyFeedError, getLastFeedUrl, type FeedErrorKind, type FeedPost } from '../api/pixelfed';
 import { HOME_INSTANCE } from '../config';
@@ -73,7 +74,11 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
   const logoutBtn = document.createElement('button');
   logoutBtn.className = 'text-ink/30 hover:text-ink/60 transition-colors';
   logoutBtn.textContent = 'disconnect';
-  logoutBtn.addEventListener('click', () => { clearAuth(); window.location.reload(); });
+  logoutBtn.addEventListener('click', () => {
+    // Order matters: disableNotifications() authenticates with the current
+    // token, so it has to run before clearAuth() erases it.
+    void disableNotifications().finally(() => { clearAuth(); window.location.reload(); });
+  });
   footer.appendChild(logoutBtn);
 
   body.appendChild(footer);
@@ -509,7 +514,9 @@ function renderFeedError(container: HTMLElement, kind: FeedErrorKind, auth: Auth
     </div>
   `;
   container.querySelector('#btn-feed-retry')?.addEventListener('click', retry);
-  container.querySelector('#btn-feed-switch')?.addEventListener('click', () => { clearAuth(); window.location.reload(); });
+  container.querySelector('#btn-feed-switch')?.addEventListener('click', () => {
+    void disableNotifications().finally(() => { clearAuth(); window.location.reload(); });
+  });
 }
 
 function escapeHtml(s: string): string {

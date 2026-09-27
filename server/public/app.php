@@ -143,6 +143,13 @@ function push(string $path): void
 
     $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
     if ($method !== 'POST') meenow_json_response(405, ['error' => 'method_not_allowed']);
+    // Same rule as the proxy: no anonymous traffic. The token is validated by the
+    // instance, not here — this only refuses unauthenticated subscription churn
+    // (planting rows, or removing endpoints someone else owns). The public key
+    // above stays open: it is public and needed before a token exists.
+    if (empty($_SERVER['HTTP_AUTHORIZATION'])) {
+        meenow_json_response(401, ['error' => 'authorization_required']);
+    }
     meenow_rate_limit();
 
     $body = meenow_json_input();
@@ -159,6 +166,11 @@ function push(string $path): void
     $p256dh = $body['keys']['p256dh'] ?? null;
     $auth = $body['keys']['auth'] ?? null;
     $tz = $body['tz'] ?? null;
+    // Owning account, self-asserted as "<instance>:<accountId>". Not a credential
+    // (the endpoint URL is the capability), but it makes a row attributable:
+    // logout can clean up, and ticks can be gated on whether that account posted.
+    $account = $body['account'] ?? '';
+    if (!is_string($account) || strlen($account) > 191) $account = '';
 
     if (!is_string($p256dh) || !is_string($auth)
         || strlen($p256dh) > 128 || strlen($auth) > 128) {
@@ -176,19 +188,20 @@ function push(string $path): void
 
     $pdo = meenow_db();
     match ($path) {
-        '/push/subscribe' => subscribe($pdo, $endpoint, $p256dh, $auth, $tz),
-        '/push/unsubscribe' => unsubscribe($pdo, $endpoint),
+        '/push/subscribe' => subscribe($pdo, $endpoint, $p256dh, $auth, $tz, $account),
         default => meenow_json_response(404, ['error' => 'not_found']),
     };
 }
 
-function subscribe(PDO $pdo, string $endpoint, string $p256dh, string $auth, string $tz): void
+function subscribe(PDO $pdo, string $endpoint, string $p256dh, string $auth, string $tz,
+                   string $account): void
 {
     $stmt = $pdo->prepare(
-        'INSERT INTO subscriptions (endpoint, p256dh, auth, tz) VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE p256dh = VALUES(p256dh), auth = VALUES(auth), tz = VALUES(tz)'
+        'INSERT INTO subscriptions (endpoint, p256dh, auth, tz, account) VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE p256dh = VALUES(p256dh), auth = VALUES(auth),
+                                 tz = VALUES(tz), account = VALUES(account)'
     );
-    $stmt->execute([$endpoint, $p256dh, $auth, $tz]);
+    $stmt->execute([$endpoint, $p256dh, $auth, $tz, $account]);
     meenow_json_response(200, ['ok' => true]);
 }
 

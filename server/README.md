@@ -10,7 +10,9 @@ shared host. It lives inside the app repo as `server/`. Two jobs:
    server-to-server (no CORS either). This is what makes the app immune to
    instances rolling out restrictive CORS policies.
 2. **Web Push** — subscription store in MySQL (`/push/subscribe`,
-   `/push/unsubscribe`) and a timezone-gated daily tick sent from the URL-cron.
+   `/push/unsubscribe`, both behind the same Bearer-token gate as the proxy;
+   `/push/public-key` stays open) and a timezone-gated daily tick sent from the
+   URL-cron.
 
 ## Layout
 
@@ -55,7 +57,8 @@ Per instance (repeat for dev). SSH into the host, work in the instance dir.
    because config is missing.
 4. **Config**: `cp config.example.php config/config.php`, fill in DB creds +
    `cron_key` (`php -r 'echo bin2hex(random_bytes(32))'`).
-5. **Schema**: `mysql -h localhost -u DBUSER -p DBNAME < schema.sql`.
+5. **Schema**: `php scripts/migrate.php` — creates the tables from `schema.sql`
+   (idempotent; later installs get this applied automatically by `install.sh`).
 6. **VAPID**: `php scripts/gen-vapid.php` → writes `config/vapid.json` (0600).
 7. **Smoke**: `php scripts/smoke.php` — must print "All checks passed."
 8. **Point the domain's docroot at `<instance>/public`** (hosting panel or vhost
@@ -68,8 +71,31 @@ Per instance (repeat for dev). SSH into the host, work in the instance dir.
 
 From the instance dir: `./install.sh` (latest), `./install.sh v1.2.3`,
 `./install.sh --pr 42` or `./install.sh --ref main` (preview builds), or
-`./install.sh --rollback`. Each run re-runs composer + smoke and never touches
-`config/`, `cache/` or `vendor/`. Builds are produced by `.github/workflows/release.yml`.
+`./install.sh --rollback`. Each run applies the DB schema, re-runs composer +
+smoke and never touches `config/`, `cache/` or `vendor/`. Builds are produced by
+`.github/workflows/release.yml`.
+
+**Schema is applied automatically.** Before the new build is swapped in,
+`install.sh` runs `php scripts/migrate.php`, which loads `schema.sql` (its
+`CREATE TABLE IF NOT EXISTS` creates any missing table) and then applies the
+additive migrations listed in that script — guarded by `information_schema`
+lookups, so every run is idempotent and a half-applied state repairs itself.
+Because it runs *before* the rsync swap, a DB error aborts the install and the
+previous build stays live. Migrations are additive-only, so `--rollback` to an
+older build is safe (old code ignores new columns).
+
+When you add a schema change: put the new shape in `schema.sql` (for fresh
+installs) **and** append a guarded entry to the `$migrations` list in
+`scripts/migrate.php` (for existing installs — `schema.sql` alone never alters
+an existing table). Example, the `subscriptions.account` column:
+
+```php
+[
+    'name' => 'subscriptions.account column',
+    'needed' => fn(): bool => !$hasColumn('subscriptions', 'account'),
+    'sql' => "ALTER TABLE subscriptions ADD COLUMN account VARCHAR(191) NOT NULL DEFAULT '' AFTER tz",
+],
+```
 
 ## Testing
 

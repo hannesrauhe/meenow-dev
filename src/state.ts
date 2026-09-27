@@ -38,6 +38,10 @@ export function setStoredVapidKey(key: string): void {
   localStorage.setItem('meenow:vapid-key', key);
 }
 
+export function clearStoredVapidKey(): void {
+  localStorage.removeItem('meenow:vapid-key');
+}
+
 // IANA timezone last successfully registered with the push backend. A mismatch
 // with the device timezone on app load (travel, or never synced) triggers
 // syncSubscriptionTz().
@@ -47,6 +51,10 @@ export function getSyncedTz(): string | null {
 
 export function setSyncedTz(tz: string): void {
   localStorage.setItem('meenow:tz', tz);
+}
+
+export function clearSyncedTz(): void {
+  localStorage.removeItem('meenow:tz');
 }
 
 // Records that the account has been ensured "locked" (manually approve followers,

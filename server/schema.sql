@@ -1,15 +1,21 @@
 -- meenow server schema (MySQL / MariaDB — load with the mysql client)
 
 -- Web Push subscriptions, one row per device subscription.
+-- account is the self-asserted owner ("<instance>:<accountId>", empty for rows
+-- written before ownership existed). Not a credential — the endpoint URL is the
+-- capability — but it makes a row attributable: logout cleanup, and per-account
+-- tick gating once the server learns who posted.
 CREATE TABLE IF NOT EXISTS subscriptions (
     id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     endpoint   VARCHAR(500) NOT NULL,
     p256dh     VARCHAR(128) NOT NULL,
     auth       VARCHAR(128) NOT NULL,
     tz         VARCHAR(64)  NOT NULL DEFAULT 'Europe/Berlin',
+    account    VARCHAR(191) NOT NULL DEFAULT '',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY endpoint (endpoint(191))
+    UNIQUE KEY endpoint (endpoint(191)),
+    KEY account (account)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Per-IP request counter for the proxy rate limit (one row per IP per minute).

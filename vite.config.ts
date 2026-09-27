@@ -24,36 +24,36 @@ export default defineConfig(() => ({
       '/health': PHP_BACKEND,
     },
   },
-    plugins: [
-      VitePWA({
-        registerType: 'prompt',
-        strategies: 'injectManifest',
-        srcDir: 'src',
-        filename: 'sw.ts',
-        manifest: {
-          id: '/',
-          name: 'meenow',
-          short_name: 'meenow',
-          description: 'Daily spontaneous photo sharing with friends via Pixelfed',
-          theme_color: '#FDFBF7',
-          background_color: '#FDFBF7',
-          display: 'standalone',
-          orientation: 'any',
-          start_url: '/',
-          icons: [
-            { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' },
-            { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-            { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
-            { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-          ],
-        },
-        injectManifest: {
-          globPatterns: ['**/*.{js,css,html,svg,png}'],
-        },
-        devOptions: {
-          enabled: true,
-          type: 'module',
-        },
-      }),
-    ],
+  plugins: [
+    VitePWA({
+      registerType: 'prompt',
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
+      manifest: {
+        id: '/',
+        name: 'meenow',
+        short_name: 'meenow',
+        description: 'Daily spontaneous photo sharing with friends via Pixelfed',
+        theme_color: '#FDFBF7',
+        background_color: '#FDFBF7',
+        display: 'standalone',
+        orientation: 'any',
+        start_url: '/',
+        icons: [
+          { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' },
+          { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+          { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ],
+      },
+      injectManifest: {
+        globPatterns: ['**/*.{js,css,html,svg,png}'],
+      },
+      devOptions: {
+        enabled: true,
+        type: 'module',
+      },
+    }),
+  ],
 }));

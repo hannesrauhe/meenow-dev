@@ -456,7 +456,10 @@ async function init(): Promise<void> {
   // in a browser tab and needs to be re-created in the installed PWA context.
   // The tz sync runs after: a fresh re-subscribe already writes the timezone,
   // and running both concurrently would race on the same subscription.
-  void resubscribeIfNeeded().then(() => syncSubscriptionTz());
+  // Authenticated only: /push/* requires a Bearer token, and re-subscribing
+  // logged-out would burn the browser subscription against a 401. The login
+  // flow's notification nudge (feed screen only) registers from scratch.
+  if (getAuthState()) void resubscribeIfNeeded().then(() => syncSubscriptionTz());
 
   // Opening the app answers the daily-reminder badge regardless of posting.
   clearAppBadge();

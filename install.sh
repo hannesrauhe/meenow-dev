@@ -81,6 +81,18 @@ tar -xzf "$RELEASES/$ASSET" -C "$TMP"
 
 OLD_VERSION=$(cat VERSION 2>/dev/null || echo "(uninstalled)")
 
+# Apply the database schema BEFORE swapping in the new build: if the DB is
+# unreachable or a migration fails, this aborts and the old build stays live.
+# Idempotent (CREATE TABLE IF NOT EXISTS + guarded ALTERs) — see the header of
+# server/scripts/migrate.php. Needs config/config.php, so it is skipped on a
+# first install (no config yet); the gate below points at the setup docs.
+if [ -f config/config.php ]; then
+  echo "Applying database schema ..."
+  php "$TMP/scripts/migrate.php" "$DIR/config/config.php"
+else
+  echo "Skipping schema migrate (config/config.php missing yet)."
+fi
+
 # Merge into the instance dir; server-owned paths survive --delete.
 rsync -a --delete \
   --exclude config/ --exclude cache/ --exclude vendor/ \
@@ -108,7 +120,8 @@ if [ -f config/config.php ]; then
 else
   echo "Installed $NEW_VERSION — but config/config.php is missing."
   echo "Next: cp config.example.php config/config.php, fill it in, run"
-  echo "      php scripts/gen-vapid.php && php scripts/smoke.php, then load schema.sql."
+  echo "      php scripts/gen-vapid.php && php scripts/smoke.php, then"
+  echo "      php scripts/migrate.php (or just re-run ./install.sh once config exists)."
 fi
 
 echo "Done: $OLD_VERSION -> $NEW_VERSION"
