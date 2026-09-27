@@ -96,6 +96,17 @@ exchange, useless without the browser-held verifier) — at either path prefix.
 `/oauth/authorize` is deliberately NOT proxied: it's a top-level browser
 navigation (CORS-exempt) and proxying a login form would break.
 
+**Bodies** (`src/proxy.php`): JSON and urlencoded bodies are forwarded verbatim,
+with Content-Type re-added explicitly (Apache hides it from `HTTP_*`).
+`multipart/form-data` — the media upload — cannot be: PHP consumes it into
+`$_POST`/`$_FILES` and leaves `php://input` empty, so a raw-stream relay would
+upload an empty file (upstream 422). The proxy rebuilds the form for curl
+instead, which generates a fresh boundary; the inbound Content-Type is dropped
+in that case. Files PHP itself refused (`upload_max_filesize`) or a body past
+`post_max_size` produce a clear 413 rather than a confusing upstream 422 — the
+limits come from `public/.user.ini` (20M/25M; on mod_php set them in php.ini
+instead). Unit-tested in `scripts/test-proxy-body.php`.
+
 ## Cron endpoint
 
 Many shared hosts only allow scheduled HTTP GETs, so the tick is a key-gated URL
