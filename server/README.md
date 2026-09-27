@@ -4,8 +4,9 @@ The meenow backend (PHP + MySQL + URL-cron), designed to run on any PHP+MySQL
 shared host. It lives inside the app repo as `server/`. Two jobs:
 
 1. **API proxy** — `/api/*` and `/oauth/token` are passed through to the home
-   Pixelfed instance (`pixelfed.social`). The PWA is served from the same origin,
-   so browser↔meenow is same-origin (no CORS) and meenow↔Pixelfed is
+   Pixelfed instance (`pixelfed.social`); allowlisted second instances are reached
+   under `/i/<instance>/…`. The PWA is served from the same origin, so
+   browser↔meenow is same-origin (no CORS) and meenow↔Pixelfed is
    server-to-server (no CORS either). This is what makes the app immune to
    instances rolling out restrictive CORS policies.
 2. **Web Push** — subscription store in MySQL (`/push/subscribe`,
@@ -18,7 +19,7 @@ One directory per instance; the domain points at its `public/` subdir, so
 
 ```
 <instance>/            one directory per deployment (e.g. meenow.de/, dev.meenow.de/)
-  public/     ← domain docroot: PWA build (index.html…) + app.php router + .htaccess
+  public/     ← domain docroot: PWA build (index.html…) + app.php router + .htaccess + .user.ini
   src/        PHP app (bootstrap, proxy, push, tick, trigger math, xkcd cache)
   scripts/    gen-vapid.php, smoke.php, parity-test.{php,mjs}, test-local.sh
   config/     config.php + vapid.json — SERVER-ONLY, never committed/overwritten
@@ -69,6 +70,15 @@ From the instance dir: `./install.sh` (latest), `./install.sh v1.2.3`,
 `./install.sh --pr 42` or `./install.sh --ref main` (preview builds), or
 `./install.sh --rollback`. Each run re-runs composer + smoke and never touches
 `config/`, `cache/` or `vendor/`. Builds are produced by `.github/workflows/release.yml`.
+
+## Testing
+
+`bash scripts/test-local.sh` (Docker only — MariaDB + PHP 8.3, no local config
+or DB needed) runs the full suite: endpoints, proxy routing and the auth gate,
+JSON + multipart body relay, cron, rate limiter, plus the proxy body/header unit
+tests (`scripts/test-proxy-body.php`). The proxy checks hit the live home
+instance, so it needs internet. Run it after touching `public/app.php` or
+`src/proxy.php`.
 
 ## Trigger-math parity
 

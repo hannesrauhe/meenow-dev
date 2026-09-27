@@ -68,8 +68,9 @@ check "proxy /i passthrough" '"uri"' "$(MEENOW_AUTH='Bearer testtoken' H GET htt
 check "proxy /i 401 no auth" 'authorization_required' "$(H GET http://127.0.0.1:8080/i/pixelfed.de/api/v1/timelines/home)"
 check "proxy /i not allowed" 'not_found' "$(MEENOW_AUTH='Bearer t' H GET http://127.0.0.1:8080/i/evil.example/api/v1/timelines/home)"
 # Regression: JSON POST bodies must keep Content-Type: application/json when
-# forwarded (Apache/PHP hide it from HTTP_*; without the fix upstream sees
-# form-encoded and rejects with 422 "client_name field is required").
+# forwarded (Apache exposes it only as CONTENT_TYPE, invisible to the HTTP_*
+# loop; without the explicit add upstream sees form-encoded and rejects with
+# 422 "client_name field is required").
 check "proxy JSON POST" '"client_id"' "$(H POST http://127.0.0.1:8080/api/v1/apps \
   "{\"client_name\":\"meenow-test-$$\",\"redirect_uris\":\"http://127.0.0.1:8080/\",\"scopes\":\"read\"}")"
 # Regression: multipart POST bodies (media uploads). PHP consumes them into
