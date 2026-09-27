@@ -30,10 +30,22 @@ $cfg = ["home_instance" => "pixelfed.social",
 file_put_contents("/app/config/config.php", "<?php return " . var_export($cfg, true) . ";");'
 [ -s config/config.php ] && ok "config written" || bad "config written" "empty"
 
+# Schema through migrate.php — the exact path install.sh uses, so the migration
+# code (not just schema.sql) is exercised on every run.
+php scripts/migrate.php > /tmp/migrate.out 2>&1 && ok "migrate baseline" || bad "migrate baseline" "$(cat /tmp/migrate.out)"
+# Simulate an install predating subscriptions.account, then re-run: the guarded
+# ALTER must fire again and keep existing rows (schema.sql alone can't do this).
 php -r '
-$pdo = new PDO("mysql:host=" . getenv("DB_HOST") . ";dbname=meenow", "meenow", "meenowpw");
-$pdo->exec(file_get_contents("schema.sql"));'
-ok "schema loaded"
+$p = new PDO("mysql:host=".getenv("DB_HOST").";dbname=meenow","meenow","meenowpw",[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
+$p->exec("ALTER TABLE subscriptions DROP KEY account");
+$p->exec("ALTER TABLE subscriptions DROP COLUMN account");
+$p->exec("INSERT INTO subscriptions (endpoint,p256dh,auth) VALUES (\"https://legacy/p\",\"a\",\"b\")");'
+UP=$(php scripts/migrate.php 2>&1) || true
+check "migrate upgrade fires" 'apply' "$UP"
+LEG=$(php -r '$p=new PDO("mysql:host=".getenv("DB_HOST").";dbname=meenow","meenow","meenowpw"); $c=$p->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=\"subscriptions\" AND COLUMN_NAME=\"account\"")->fetchColumn(); echo $c.":".$p->query("SELECT account=\"\" FROM subscriptions WHERE endpoint=\"https://legacy/p\"")->fetchColumn();')
+check "migrate kept legacy row + column" '1:1' "$LEG"
+# Drop the legacy row so it doesn't skew the later cron-tick subscription count.
+php -r '$p=new PDO("mysql:host=".getenv("DB_HOST").";dbname=meenow","meenow","meenowpw"); $p->exec("DELETE FROM subscriptions WHERE endpoint=\"https://legacy/p\"");'
 
 # --- smoke test ---------------------------------------------------------------
 SMOKE=$(php scripts/smoke.php 2>&1) && check "smoke.php" "All checks passed" "$SMOKE" || bad "smoke.php" "$SMOKE"
@@ -47,12 +59,18 @@ H2() { php scripts/http-multipart.php "$@"; }
 
 check "health" '"ok":true' "$(H GET http://127.0.0.1:8080/health)"
 check "cron bad key" 'bad_key' "$(H GET 'http://127.0.0.1:8080/cron?key=nope')"
-check "push invalid body" 'invalid_subscription' "$(H POST http://127.0.0.1:8080/push/subscribe '{}')"
-check "push subscribe" '"ok":true' "$(H POST http://127.0.0.1:8080/push/subscribe \
-  '{"endpoint":"https://example.org/p/abc","keys":{"p256dh":"BKdZ","auth":"d2hhdGV2ZXI"},"tz":"Europe/Berlin"}')"
-check "push bad tz" '"ok":true' "$(H POST http://127.0.0.1:8080/push/subscribe \
+# /push/subscribe + /push/unsubscribe need a Bearer token (public-key stays open).
+check "push 401 no auth" 'authorization_required' "$(H POST http://127.0.0.1:8080/push/subscribe \
+  '{"endpoint":"https://example.org/p/zz","keys":{"p256dh":"a","auth":"b"}}')"
+check "push invalid body" 'invalid_subscription' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/push/subscribe '{}')"
+check "push subscribe" '"ok":true' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/push/subscribe \
+  '{"endpoint":"https://example.org/p/abc","keys":{"p256dh":"BKdZ","auth":"d2hhdGV2ZXI"},"tz":"Europe/Berlin","account":"pixelfed.social:42"}')"
+check "push bad tz" '"ok":true' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/push/subscribe \
   '{"endpoint":"https://example.org/p/def","keys":{"p256dh":"BKdZ","auth":"d2hhdGV2ZXI"},"tz":"Not/AZone!!"}')"
-check "push unsubscribe" '"ok":true' "$(H POST http://127.0.0.1:8080/push/unsubscribe \
+# The owning account is stored on subscribe (empty when not sent).
+ACCT=$(php -r '$c=require "config/config.php"; echo (new PDO("mysql:host=".$c["db"]["host"].";dbname=".$c["db"]["name"], $c["db"]["user"], $c["db"]["pass"]))->query("SELECT account FROM subscriptions WHERE endpoint=\"https://example.org/p/abc\"")->fetchColumn();')
+check "push account stored" 'pixelfed.social:42' "$ACCT"
+check "push unsubscribe" '"ok":true' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/push/unsubscribe \
   '{"endpoint":"https://example.org/p/abc"}')"
 
 # Proxy against the real home instance (unauthenticated public endpoint).
@@ -92,9 +110,11 @@ check "cron tick" '"subscriptions":1' "$(H GET 'http://127.0.0.1:8080/cron?actio
 check "cron dedupe" 'slot already ran' "$(H GET 'http://127.0.0.1:8080/cron?action=tick&key=testkey123')"
 
 # Rate limit (max=5/min): earlier push/proxy calls consumed the budget; hammer.
+# Authenticated — push() checks the token before the limiter, so an anonymous
+# post 401s and never reaches it.
 RL=""
 for i in 1 2 3 4 5 6; do
-  RL=$(H POST http://127.0.0.1:8080/push/subscribe \
+  RL=$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/push/subscribe \
        '{"endpoint":"https://example.org/p/rl","keys":{"p256dh":"a","auth":"b"}}')
   case "$RL" in *STATUS\ 429*) break;; esac
 done

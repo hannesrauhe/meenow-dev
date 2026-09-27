@@ -97,7 +97,7 @@ No hardcoded `client_id` or `client_secret`. On first use with a given instance:
 
 ### Push Notifications
 
-Standard Web Push (VAPID). The PHP backend stores subscriptions in MySQL (`POST /push/subscribe` from the client) and a key-gated URL-cron (every 30 min) sends a generic tick to every subscription, gated per device to its local trigger window, pruning expired endpoints. All scheduling logic stays client-side: the service worker shows a notification on each tick until the user has posted in the current trigger period (state shared with the SW via IndexedDB). Once the user has posted, otherwise-silent ticks are turned into engagement digests ("3 likes · 1 reply on your meenow"). See `CLAUDE.md` for the full push architecture and `server/README.md` for the backend.
+Standard Web Push (VAPID). The PHP backend stores subscriptions in MySQL (`POST /push/subscribe` from the client, authenticated like the API proxy) and a key-gated URL-cron (every 30 min) sends a generic tick to every subscription, gated per device to its local trigger window, pruning expired endpoints. Logging out deletes the subscription again. All scheduling logic stays client-side: the service worker shows a notification on each tick until the user has posted in the current trigger period (state shared with the SW via IndexedDB). Once the user has posted, otherwise-silent ticks are turned into engagement digests ("3 likes · 1 reply on your meenow"). See `AGENTS.md` for the full push architecture and `server/README.md` for the backend.
 
 ---
 
@@ -116,6 +116,6 @@ npm install
 npm run dev
 ```
 
-The dev server proxies `/api`, `/push`, `/xkcd.json` to a local PHP backend: run `php -S localhost:8080 server/scripts/router.php` alongside (setup in `server/README.md`).
+The dev server proxies `/api`, `/i`, `/push`, `/xkcd.json` to a local PHP backend: run `php -S localhost:8080 server/scripts/router.php` alongside (setup in `server/README.md`).
 
 Deployment is pull-based: `.github/workflows/release.yml` builds the PWA and packages a tarball (tags → releases; `main` and PRs → a rolling `preview` prerelease). On the hosting machine, `./install.sh` (or `--pr N`, `--ref main`, `--rollback`) downloads it, merges into the instance dir, runs `composer install --no-dev` and the smoke test. `meenow.de` and `dev.meenow.de` are two such instance dirs; see `server/README.md`.

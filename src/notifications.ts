@@ -1,7 +1,8 @@
 // Push notifications: VAPID subscription registration against the meenow PHP
 // backend (/push/*), permission request, and PWA-context re-subscription.
-import { isPwaInstalled, isPwaSubbed, setPwaSubbed, clearPwaSubbed, getStoredVapidKey, setStoredVapidKey, getSyncedTz, setSyncedTz } from './state';
+import { isPwaInstalled, isPwaSubbed, setPwaSubbed, clearPwaSubbed, getStoredVapidKey, setStoredVapidKey, clearStoredVapidKey, getSyncedTz, setSyncedTz, clearSyncedTz } from './state';
 import { PUSH_SUBSCRIBE_URL, PUSH_UNSUBSCRIBE_URL, VAPID_KEY_URL } from './config';
+import { getAuthState } from './api/auth';
 
 function deviceTz(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -34,10 +35,18 @@ export async function getVapidPublicKey(): Promise<string | null> {
 
 async function registerSubscription(sub: PushSubscription): Promise<boolean> {
   try {
+    // `account` names the owning meenow account so the backend can attribute the
+    // row (logout cleanup, per-account tick gating later). The endpoint URL is
+    // the capability; this is metadata, not a credential.
+    const acct = getAuthState();
     const res = await fetch(PUSH_SUBSCRIBE_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...sub.toJSON(), tz: deviceTz() }),
+      headers: authHeader(),
+      body: JSON.stringify({
+        ...sub.toJSON(),
+        tz: deviceTz(),
+        account: acct ? `${acct.instance}:${acct.accountId}` : '',
+      }),
     });
     if (res.ok) setSyncedTz(deviceTz());
     return res.ok;
@@ -50,10 +59,18 @@ async function unregisterSubscription(sub: PushSubscription): Promise<void> {
   try {
     await fetch(PUSH_UNSUBSCRIBE_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeader(),
       body: JSON.stringify({ endpoint: sub.endpoint }),
     });
   } catch { /* best-effort; the cron prunes dead endpoints anyway */ }
+}
+
+// The push endpoints require a Bearer token like the proxy does — subscriptions
+// belong to a logged-in account. Empty when logged out (the request then 401s,
+// which every caller here treats as a silent no-op).
+function authHeader(): Record<string, string> {
+  const token = getAuthState()?.accessToken ?? '';
+  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 }
 
 export function isPushSupported(): boolean {
@@ -102,6 +119,23 @@ export async function enableNotifications(): Promise<'granted' | 'denied' | 'err
   isPwaInstalled() ? setPwaSubbed() : clearPwaSubbed();
   setStoredVapidKey(vapidKey);
   return 'granted';
+}
+
+// Logout: drop the browser push subscription AND its server row, so a
+// disconnected account stops receiving ticks. Best-effort — a failed server
+// delete leaves a row that 410-pruning or the next login's upsert removes.
+// Call before clearAuth(), which erases the token this request needs.
+export async function disableNotifications(): Promise<void> {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return;
+    await unregisterSubscription(sub);
+    await sub.unsubscribe();
+  } catch { /* best-effort */ }
+  clearStoredVapidKey();
+  clearSyncedTz();
+  clearPwaSubbed();
 }
 
 // On first launch as an installed PWA, the existing push subscription was
