@@ -1,8 +1,14 @@
 <?php
 // Copy to config/config.php in the instance dir and fill in. Never commit a real config.
 return [
-    // The one Pixelfed instance meenow talks to. Hard-whitelisted by the proxy.
+    // The primary Pixelfed instance: served at bare /api/* and /oauth/token.
     'home_instance' => 'pixelfed.social',
+
+    // Additional instances the proxy will relay to, under /i/<instance>/api/*
+    // and /i/<instance>/oauth/token. Exact-match allowlist — the client's
+    // PROXIED_INSTANCES constant must mirror this list. Second-level options:
+    // same CORS immunity and auth gate, but no vanish promise and no bot.
+    'proxied_instances' => ['pixelfed.de', 'gram.social'],
 
     'db' => [
         'host' => 'localhost',

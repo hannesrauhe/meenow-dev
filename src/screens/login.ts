@@ -3,7 +3,7 @@
 import { startOAuthFlow } from '../api/auth';
 import { isPwaInstalled, isIOS } from '../state';
 import { canPromptInstall, promptInstall } from '../components/installNudge';
-import { HOME_INSTANCE } from '../config';
+import { HOME_INSTANCE, PROXIED_INSTANCES } from '../config';
 
 interface IntroStep {
   title: string;
@@ -17,8 +17,10 @@ type Step =
   | { kind: 'connect' };
 
 // meenow's community lives on HOME_INSTANCE (see src/config.ts): the vanish
-// promise only holds where posts are local, and several public instances send
-// no CORS headers at all. A manual field stays as an unsupported escape hatch.
+// promise only holds where posts are local. PROXIED_INSTANCES are offered as
+// secondary options (proxied, so CORS-immune, but no bot and cross-instance
+// circles don't fully vanish). A manual field stays as an unsupported
+// direct-connect escape hatch.
 
 const INTRO_STEPS: IntroStep[] = [
   {
@@ -184,6 +186,14 @@ export function renderLogin(): HTMLElement {
           <span class="font-medium text-ink">${HOME_INSTANCE}</span>
           <span class="text-xs text-ink/40">Connect →</span>
         </button>
+        <p class="pt-1 text-[11px] uppercase tracking-wide text-ink/35 text-center">also works via meenow's server</p>
+        ${PROXIED_INSTANCES.map((inst) => `
+        <button data-instance="${inst}" class="instance-pick w-full flex items-center justify-between
+                 bg-transparent border border-ink/10 rounded-xl px-4 py-2.5 text-left
+                 active:scale-[.99] transition-transform hover:border-gold">
+          <span class="text-sm text-ink/70">${inst}</span>
+          <span class="text-xs text-ink/35">Connect →</span>
+        </button>`).join('')}
       </div>
 
       <p id="login-error" class="text-xs text-red-500 hidden text-center"></p>
@@ -210,8 +220,8 @@ export function renderLogin(): HTMLElement {
       </div>
 
       <p class="text-xs text-ink/40 text-center leading-relaxed">
-        Other instances are unsupported: photos may not vanish for your followers, and some
-        instances block browser apps entirely.
+        On the smaller instances photos may not vanish for followers on other
+        servers. Manually entered instances connect directly and are unsupported.
       </p>
 
       <div class="flex items-center justify-center gap-1.5">${dots()}</div>

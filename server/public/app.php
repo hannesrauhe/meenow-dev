@@ -3,11 +3,12 @@ declare(strict_types=1);
 
 // Front controller (reached via the .htaccess rewrite; the PWA's index.html is
 // the directory index). Routes:
-//   /api/*, /oauth/token -> Pixelfed pass-through proxy (the CORS killer)
-//   /push/*              -> Web Push subscription store
-//   /xkcd.json           -> cached xkcd mirror (refresh-on-request)
-//   /cron                -> URL-cron entry point (daily tick)
-//   /health              -> liveness probe
+//   /api/*, /oauth/token       -> proxy to the home instance (the CORS killer)
+//   /i/<instance>/api/* etc.   -> proxy to an allowlisted second instance
+//   /push/*                    -> Web Push subscription store
+//   /xkcd.json                 -> cached xkcd mirror (refresh-on-request)
+//   /cron                      -> URL-cron entry point (daily tick)
+//   /health                    -> liveness probe
 // Note: /oauth/authorize is deliberately NOT proxied — it is a top-level browser
 // navigation (not subject to CORS) and proxying its HTML/login form would break.
 // Layout: this file lives in <app>/public (the docroot); src/, config/, cache/
@@ -30,6 +31,7 @@ match (true) {
     $path === '/health' => health(),
     $path === '/cron' => require $appRoot . '/src/cron.php',
     $path === '/xkcd.json' => (require $appRoot . '/src/xkcd.php')(),
+    preg_match('#^/i/([a-z0-9.-]+)(/api/.*|/oauth/token)$#', $path, $m) === 1 => proxy_instance($m[1], $m[2]),
     str_starts_with($path, '/api/') || $path === '/oauth/token' => proxy($path),
     str_starts_with($path, '/push/') => push($path),
     default => meenow_json_response(404, ['error' => 'not_found']),
@@ -41,18 +43,31 @@ function health(): void
     meenow_json_response(200, ['ok' => true, 'php' => PHP_VERSION]);
 }
 
-function proxy(string $path): void
+// Second-instance proxy: /i/<host>/... . The host must match the allowlist
+// EXACTLY (config proxied_instances) — it is never taken from user input
+// beyond this comparison, and unknown hosts 404 (never a redirect, which would
+// leak the allowlist).
+function proxy_instance(string $host, string $path): void
 {
-    $cfg = meenow_config();
+    $allowed = meenow_config()['proxied_instances'] ?? [];
+    if (!in_array($host, $allowed, true)) {
+        meenow_json_response(404, ['error' => 'not_found']);
+    }
+    proxy($path, $host);
+}
+
+function proxy(string $path, ?string $host = null): void
+{
     $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
     // No anonymous relaying: every proxied request must carry the user's
-    // Bearer token (we don't validate it — Pixelfed does; we just refuse to
-    // be a free proxy for IP laundering). Abuse therefore requires a real
-    // pixelfed.social account and stays attributable to its token.
+    // Bearer token (we don't validate it — the instance does; we just refuse
+    // to be a free proxy for IP laundering). Abuse therefore requires a real
+    // account on the target instance and stays attributable to its token.
     // The two bootstrap endpoints run before a token exists and stay open
     // (rate-limited): app registration and the PKCE token exchange, which is
-    // useless without the verifier held by the original browser.
+    // useless without the verifier held by the original browser. Paths are
+    // already prefix-stripped, so this covers /i/<host>/ variants too.
     $open = $path === '/oauth/token'
         || ($path === '/api/v1/apps' && $method === 'POST');
     if (!$open && empty($_SERVER['HTTP_AUTHORIZATION'])) {
@@ -60,7 +75,7 @@ function proxy(string $path): void
     }
     if ($open) meenow_rate_limit();
 
-    $target = 'https://' . $cfg['home_instance'] . $path;
+    $target = 'https://' . ($host ?? meenow_config()['home_instance']) . $path;
     $qs = $_SERVER['QUERY_STRING'] ?? '';
     if ($qs !== '') $target .= '?' . $qs;
 

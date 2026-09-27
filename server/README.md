@@ -83,16 +83,18 @@ diff /tmp/php.txt /tmp/js.txt                # must be empty
 
 ## Proxy hardening
 
-Target is hard-whitelisted to `home_instance` (no target parameter), paths
-restricted to `/api/*` + `/oauth/token`, cookies/Origin/Referer stripped,
-HTTPS-only. **Requests without an `Authorization` header get a 401 from us**
-— the token itself is validated by Pixelfed, we only refuse to relay
-anonymously, so abuse needs a real account and stays attributable. The two
-bootstrap endpoints stay open (rate-limited per IP in MySQL): `POST /api/v1/apps`
-(dynamic registration) and `POST /oauth/token` (PKCE exchange, useless without
-the browser-held verifier). `/oauth/authorize` is deliberately NOT proxied:
-it's a top-level browser navigation (CORS-exempt) and proxying a login form
-would break.
+Targets are hard-whitelisted (no target parameter): `home_instance` is served at
+`/api/*` + `/oauth/token`, and each entry of `proxied_instances` at
+`/i/<instance>/api/*` + `/i/<instance>/oauth/token` — the host in the path must
+match the allowlist exactly or the request 404s (never a redirect). Cookies and
+Origin/Referer are stripped, HTTPS-only. **Requests without an `Authorization`
+header get a 401 from us** — the token itself is validated by the instance, we
+only refuse to relay anonymously, so abuse needs a real account and stays
+attributable. The two bootstrap endpoints stay open (rate-limited per IP in
+MySQL): `POST /api/v1/apps` (dynamic registration) and `POST /oauth/token` (PKCE
+exchange, useless without the browser-held verifier) — at either path prefix.
+`/oauth/authorize` is deliberately NOT proxied: it's a top-level browser
+navigation (CORS-exempt) and proxying a login form would break.
 
 ## Cron endpoint
 

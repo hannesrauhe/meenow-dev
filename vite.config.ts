@@ -17,6 +17,7 @@ export default defineConfig(() => ({
   server: {
     proxy: {
       '/api': PHP_BACKEND,
+      '/i': PHP_BACKEND,
       '/oauth/token': PHP_BACKEND,
       '/push': PHP_BACKEND,
       '/xkcd.json': PHP_BACKEND,

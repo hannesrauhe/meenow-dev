@@ -20,6 +20,7 @@ php scripts/gen-vapid.php > /tmp/gen.out
 
 DBH="${DB_HOST:-db}" php -r '
 $cfg = ["home_instance" => "pixelfed.social",
+  "proxied_instances" => ["pixelfed.de"],
   "db" => ["host" => getenv("DBH"), "name" => "meenow", "user" => "meenow", "pass" => "meenowpw"],
   "vapid" => ["subject" => "mailto:test@meenow.de",
               "key_file" => "/app/config/vapid.json"],
@@ -60,6 +61,11 @@ check "proxy passthrough" '"uri"' "$(MEENOW_AUTH='Bearer testtoken' H GET http:/
 # No anonymous relaying: /api without a Bearer token is refused by us (401),
 # while the two bootstrap endpoints stay open (apps POST, oauth/token).
 check "proxy 401 no auth" 'authorization_required' "$(H GET http://127.0.0.1:8080/api/v1/timelines/home)"
+# Second-instance routing: allowlisted host passes through, others 404, and the
+# auth gate applies under /i/ too.
+check "proxy /i passthrough" '"uri"' "$(MEENOW_AUTH='Bearer testtoken' H GET http://127.0.0.1:8080/i/pixelfed.de/api/v1/instance)"
+check "proxy /i 401 no auth" 'authorization_required' "$(H GET http://127.0.0.1:8080/i/pixelfed.de/api/v1/timelines/home)"
+check "proxy /i not allowed" 'not_found' "$(MEENOW_AUTH='Bearer t' H GET http://127.0.0.1:8080/i/evil.example/api/v1/timelines/home)"
 # Regression: JSON POST bodies must keep Content-Type: application/json when
 # forwarded (Apache/PHP hide it from HTTP_*; without the fix upstream sees
 # form-encoded and rejects with 422 "client_name field is required").

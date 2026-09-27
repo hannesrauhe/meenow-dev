@@ -105,7 +105,7 @@ Standard Web Push (VAPID). The PHP backend stores subscriptions in MySQL (`POST 
 
 - **Push notifications on iOS:** Web Push requires the PWA to be installed to the home screen (iOS 16.4+). The install nudge directly addresses this.
 - **Camera resolution:** Controlled by the browser, typically lower than the native camera app.
-- **Instance compatibility:** meenow is designed for its home instance, pixelfed.social, which the backend proxies. Other instances can be connected via the manual field on the login screen but are unsupported: archiving cannot retract posts from followers on other instances, and some public instances send no CORS headers at all, which makes direct browser access impossible. Standard Mastodon instances expose the same API surface but have no archive feature, so photos never vanish.
+- **Instance compatibility:** meenow is designed for its home instance, pixelfed.social. Two further instances (pixelfed.de, gram.social) are offered as second-level options and reach the API through the same backend proxy, so they work despite sending no CORS headers — but archiving cannot retract posts from followers who live on a *different* instance, so the daily-vanish promise only holds within a single-instance circle, and the Reachy bot exists only on the home instance. Instances typed manually into the login screen connect directly (no proxy) and are unsupported: some public instances send no CORS headers at all, and standard Mastodon instances have no archive feature, so photos never vanish.
 
 ---
 
