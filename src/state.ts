@@ -1,4 +1,5 @@
-// Persistent local state: localStorage helpers for notification dismiss, install dismiss, and push subscription filename.
+// Persistent local state: localStorage helpers for notification/install dismiss,
+// push subscription metadata, and account-privacy state.
 export const MAX_POSTS_PER_TRIGGER = 2;
 
 export function isNotificationNudgeDismissed(): boolean {
@@ -9,20 +10,6 @@ export function isNotificationNudgeDismissed(): boolean {
 
 export function dismissNotificationNudge(): void {
   localStorage.setItem('meenow:notif-dismiss', String(Date.now()));
-}
-
-// Tracks the filename written to the subscriptions repo so we don't create
-// duplicate files if the user re-enables notifications on the same device.
-export function getPushSubFilename(): string | null {
-  return localStorage.getItem('meenow:push-sub-file');
-}
-
-export function setPushSubFilename(filename: string): void {
-  localStorage.setItem('meenow:push-sub-file', filename);
-}
-
-export function clearPushSubFilename(): void {
-  localStorage.removeItem('meenow:push-sub-file');
 }
 
 // Set when the active push subscription was created in PWA standalone mode.
@@ -51,9 +38,9 @@ export function setStoredVapidKey(key: string): void {
   localStorage.setItem('meenow:vapid-key', key);
 }
 
-// IANA timezone last successfully written into the relay subscription file.
-// A mismatch with the device timezone on app load (travel, or a legacy file
-// written before the tz field existed) triggers syncSubscriptionTz().
+// IANA timezone last successfully registered with the push backend. A mismatch
+// with the device timezone on app load (travel, or never synced) triggers
+// syncSubscriptionTz().
 export function getSyncedTz(): string | null {
   return localStorage.getItem('meenow:tz');
 }

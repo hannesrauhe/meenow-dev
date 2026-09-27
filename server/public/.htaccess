@@ -1,0 +1,21 @@
+# meenow server docroot: the PWA build (dist/) is installed here next to this
+# file. Existing files are served directly; everything else goes to app.php,
+# which must NOT be named index.php — index.html is the PWA entry point.
+Options -Indexes
+DirectoryIndex index.html
+
+<IfModule mod_rewrite.c>
+RewriteEngine On
+
+# Static assets from the build win if they exist; everything else routes to PHP.
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+RewriteRule ^ app.php [L]
+</IfModule>
+
+# Never serve dotfiles or backups even if they slip past rsync --delete.
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>

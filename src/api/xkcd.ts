@@ -1,14 +1,13 @@
 // Second daily bonus card: the current xkcd comic. xkcd's API has no CORS
-// headers, so a cron step (scripts/fetch-xkcd.mjs, run by send-tick.yml)
-// mirrors it into xkcd.json in the (public) push relay repo, read here via
-// raw.githubusercontent.com — CORS-enabled, no auth, ~5 min CDN cache.
+// headers, so our backend serves it same-origin from /xkcd.json, refreshing a
+// server-side cache on the first request per TTL (server/src/xkcd.php).
 //
-// SECURITY: anyone holding the client-shipped relay token can write to the
-// relay repo — the mirrored JSON is untrusted user input. Every field is
-// validated here: the image URL is allowlisted to https://imgs.xkcd.com,
-// the comic link is constructed from the validated integer `num` (never read
-// from the file), and text fields are length-capped and only ever rendered
-// via textContent.
+// The response is still treated as untrusted input: every field is validated
+// here — the image URL is allowlisted to https://imgs.xkcd.com, the comic link
+// is constructed from the validated integer `num` (never read from the file),
+// and text fields are length-capped and only ever rendered via textContent.
+
+import { XKCD_URL } from '../config';
 
 export interface XkcdBonus {
   num: number;
@@ -16,8 +15,6 @@ export interface XkcdBonus {
   img: string;
   alt: string;
 }
-
-const MIRROR_URL = 'https://raw.githubusercontent.com/meenow-de/meenow-push/refs/heads/main/xkcd.json';
 
 const CACHE_KEY = 'meenow:xkcd-bonus';
 const MAX_TEXT_LEN = 1000;
@@ -68,7 +65,7 @@ export async function fetchXkcdBonus(): Promise<XkcdBonus | null> {
 
   let bonus: XkcdBonus | null = null;
   try {
-    const res = await fetch(MIRROR_URL);
+    const res = await fetch(XKCD_URL);
     if (!res.ok) return null; // don't cache transient failures
     bonus = sanitize(await res.json());
   } catch {

@@ -3,6 +3,7 @@ import type { AuthState } from './auth';
 import { patchAccountId } from './auth';
 import { getLastTriggerTime } from '../timer';
 import { MAX_POSTS_PER_TRIGGER } from '../state';
+import { apiBase } from '../config';
 import { idbGet, IDB_KEYS } from '../idb';
 
 // --- Mastodon/Pixelfed API types ---
@@ -106,7 +107,7 @@ async function uploadOne(auth: AuthState, blob: Blob, description: string): Prom
   form.append('file', blob, 'meenow.jpg');
   form.append('description', description);
 
-  const res = await fetchRetry(`https://${auth.instance}/api/v1/media`, {
+  const res = await fetchRetry(`${apiBase(auth.instance)}/api/v1/media`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${auth.accessToken}` },
     body: form,
@@ -118,7 +119,7 @@ async function uploadOne(auth: AuthState, blob: Blob, description: string): Prom
 
   for (let i = 0; i < 20; i++) {
     await new Promise(r => setTimeout(r, 1500));
-    const poll = await fetchRetry(`https://${auth.instance}/api/v1/media/${media.id}`, {
+    const poll = await fetchRetry(`${apiBase(auth.instance)}/api/v1/media/${media.id}`, {
       headers: { Authorization: `Bearer ${auth.accessToken}` },
     });
     if (!poll.ok) throw new Error(`Media poll failed (${poll.status})`);
@@ -145,7 +146,7 @@ export async function postMeenow(
 
   progress.idemKey ??= crypto.randomUUID();
   const status = statusText ? `${statusText}\n\n#meenowApp` : '#meenowApp';
-  const res = await fetchRetry(`https://${auth.instance}/api/v1/statuses`, {
+  const res = await fetchRetry(`${apiBase(auth.instance)}/api/v1/statuses`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${auth.accessToken}`,
@@ -254,8 +255,8 @@ function fetchHomeTimeline(auth: AuthState, force = false): Promise<MastodonStat
   }
 
   const url = _homeCache?.newestId
-    ? `https://${auth.instance}/api/v1/timelines/home?limit=${HOME_TIMELINE_LIMIT}&since_id=${_homeCache.newestId}`
-    : `https://${auth.instance}/api/v1/timelines/home?limit=${HOME_TIMELINE_LIMIT}`;
+    ? `${apiBase(auth.instance)}/api/v1/timelines/home?limit=${HOME_TIMELINE_LIMIT}&since_id=${_homeCache.newestId}`
+    : `${apiBase(auth.instance)}/api/v1/timelines/home?limit=${HOME_TIMELINE_LIMIT}`;
 
   // no-store: the full-page URL is identical on every launch, so a stale HTTP
   // cache hit would render an old snapshot missing the newest posts (the user's
@@ -292,7 +293,7 @@ function fetchHomeTimeline(auth: AuthState, force = false): Promise<MastodonStat
 async function resolveAccountId(auth: AuthState): Promise<string | undefined> {
   if (auth.accountId) return auth.accountId;
   try {
-    const res = await fetch(`https://${auth.instance}/api/v1/accounts/verify_credentials`, {
+    const res = await fetch(`${apiBase(auth.instance)}/api/v1/accounts/verify_credentials`, {
       headers: { Authorization: `Bearer ${auth.accessToken}` },
     });
     if (res.ok) {
@@ -362,7 +363,7 @@ function triggerArchive(auth: AuthState, statuses: MastodonStatus[]): void {
         new Date(s.created_at) < cutoff
       )
       .map(s =>
-        fetch(`https://${auth.instance}/api/v1.1/archive/add/${s.id}`, {
+        fetch(`${apiBase(auth.instance)}/api/v1.1/archive/add/${s.id}`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${auth.accessToken}` },
         })
@@ -454,7 +455,7 @@ export function resetMyPostsPagerIfStale(): void {
 }
 
 async function fetchOwnStatusesPage(auth: AuthState, accountId: string, p: MyPostsPager): Promise<MastodonStatus[]> {
-  const url = new URL(`https://${auth.instance}/api/v1/accounts/${accountId}/statuses`);
+  const url = new URL(`${apiBase(auth.instance)}/api/v1/accounts/${accountId}/statuses`, window.location.origin);
   url.searchParams.set('limit', String(MY_POSTS_PAGE_LIMIT));
   url.searchParams.set('only_media', 'true');
   if (p.statusesMaxId) url.searchParams.set('max_id', p.statusesMaxId);
@@ -470,7 +471,7 @@ async function fetchOwnStatusesPage(auth: AuthState, accountId: string, p: MyPos
 // Archive failures stay silent (non-Pixelfed instances have no archive endpoint);
 // the source is just marked exhausted with whatever was collected so far.
 async function fetchArchivePage(auth: AuthState, p: MyPostsPager): Promise<MastodonStatus[]> {
-  const base = `https://${auth.instance}/api/v1.1/archive/list`;
+  const base = `${apiBase(auth.instance)}/api/v1.1/archive/list`;
   const url = p.archiveUrl || `${base}?limit=${MY_POSTS_PAGE_LIMIT}`;
   try {
     const res = await fetch(url, { headers: { Authorization: `Bearer ${auth.accessToken}` } });
@@ -486,9 +487,9 @@ async function fetchArchivePage(auth: AuthState, p: MyPostsPager): Promise<Masto
     p.archivePage++;
     const next = json.next_page_url ?? json.links?.next;
     // Laravel may emit http:// or an internal host behind a proxy; keep only the
-    // query string, rebuilt against the canonical instance origin.
+    // query string, rebuilt against our own API base.
     p.archiveUrl = next
-      ? `${base}${new URL(next, base).search}`
+      ? `${base}${new URL(next, window.location.origin).search}`
       : `${base}?limit=${MY_POSTS_PAGE_LIMIT}&page=${p.archivePage + 1}`;
     return data;
   } catch {
@@ -537,7 +538,7 @@ export function fetchMyPostsPage(auth: AuthState): Promise<MyPostsPage> {
 }
 
 export async function fetchPostContext(auth: AuthState, statusId: string): Promise<PostContext> {
-  const res = await fetch(`https://${auth.instance}/api/v1/statuses/${statusId}/context`, {
+  const res = await fetch(`${apiBase(auth.instance)}/api/v1/statuses/${statusId}/context`, {
     headers: { Authorization: `Bearer ${auth.accessToken}` },
   });
   if (!res.ok) throw new Error(`Context fetch failed (${res.status})`);
@@ -546,7 +547,7 @@ export async function fetchPostContext(auth: AuthState, statusId: string): Promi
 }
 
 export async function postReply(auth: AuthState, inReplyToId: string, content: string): Promise<void> {
-  const res = await fetch(`https://${auth.instance}/api/v1/statuses`, {
+  const res = await fetch(`${apiBase(auth.instance)}/api/v1/statuses`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${auth.accessToken}`,
@@ -562,7 +563,7 @@ export async function postReply(auth: AuthState, inReplyToId: string, content: s
 }
 
 export async function deletePost(auth: AuthState, statusId: string): Promise<void> {
-  const res = await fetch(`https://${auth.instance}/api/v1/statuses/${statusId}`, {
+  const res = await fetch(`${apiBase(auth.instance)}/api/v1/statuses/${statusId}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${auth.accessToken}` },
   });

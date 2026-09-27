@@ -1,0 +1,4 @@
+vendor/
+config/config.php
+config/vapid.json
+cache/

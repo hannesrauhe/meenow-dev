@@ -4,6 +4,7 @@
 // (uses no DOM, but is app-only) — keep separate from pixelfed.ts, which owns the
 // post/feed lifecycle and its home-timeline cache.
 import type { AuthState } from './auth';
+import { apiBase } from '../config';
 
 export interface Connection {
   id: string;          // account id on the user's instance (what follow/authorize take)
@@ -86,7 +87,7 @@ export async function resolveHandle(auth: AuthState, handle: string): Promise<Co
   }
 
   try {
-    const url = new URL(`https://${auth.instance}/api/v1/accounts/search`);
+    const url = new URL(`${apiBase(auth.instance)}/api/v1/accounts/search`, window.location.origin);
     url.searchParams.set('q', q);
     url.searchParams.set('resolve', 'true');
     url.searchParams.set('limit', '5');
@@ -98,7 +99,7 @@ export async function resolveHandle(auth: AuthState, handle: string): Promise<Co
   } catch { /* fall through to lookup */ }
 
   try {
-    const url = new URL(`https://${auth.instance}/api/v1/accounts/lookup`);
+    const url = new URL(`${apiBase(auth.instance)}/api/v1/accounts/lookup`, window.location.origin);
     url.searchParams.set('acct', q);
     const res = await fetch(url.toString(), { headers: authHeaders(auth) });
     if (res.ok) return toConnection(await res.json() as ApiAccount);
@@ -132,7 +133,7 @@ async function parseRelationship(auth: AuthState, res: Response, accountId: stri
 }
 
 export async function follow(auth: AuthState, accountId: string): Promise<Relationship> {
-  const res = await fetch(`https://${auth.instance}/api/v1/accounts/${accountId}/follow`, {
+  const res = await fetch(`${apiBase(auth.instance)}/api/v1/accounts/${accountId}/follow`, {
     method: 'POST',
     headers: authHeaders(auth),
   });
@@ -141,7 +142,7 @@ export async function follow(auth: AuthState, accountId: string): Promise<Relati
 }
 
 export async function unfollow(auth: AuthState, accountId: string): Promise<Relationship> {
-  const res = await fetch(`https://${auth.instance}/api/v1/accounts/${accountId}/unfollow`, {
+  const res = await fetch(`${apiBase(auth.instance)}/api/v1/accounts/${accountId}/unfollow`, {
     method: 'POST',
     headers: authHeaders(auth),
   });
@@ -154,7 +155,7 @@ export async function fetchRelationships(auth: AuthState, ids: string[]): Promis
   const unique = [...new Set(ids)].filter(Boolean);
   for (let i = 0; i < unique.length; i += 40) {
     const chunk = unique.slice(i, i + 40);
-    const url = new URL(`https://${auth.instance}/api/v1/accounts/relationships`);
+    const url = new URL(`${apiBase(auth.instance)}/api/v1/accounts/relationships`, window.location.origin);
     chunk.forEach(id => url.searchParams.append('id[]', id));
     try {
       const res = await fetch(url.toString(), { headers: authHeaders(auth) });
@@ -166,7 +167,7 @@ export async function fetchRelationships(auth: AuthState, ids: string[]): Promis
 }
 
 export async function fetchFollowRequests(auth: AuthState): Promise<Connection[]> {
-  const res = await fetch(`https://${auth.instance}/api/v1/follow_requests?limit=40`, {
+  const res = await fetch(`${apiBase(auth.instance)}/api/v1/follow_requests?limit=40`, {
     headers: authHeaders(auth),
   });
   if (!res.ok) throw new Error(`Could not load requests (${res.status})`);
@@ -177,7 +178,7 @@ export async function fetchFollowRequests(auth: AuthState): Promise<Connection[]
 // back-follow call in acceptAndBackFollow, not from parsing this response body —
 // Pixelfed is inconsistent about what (if anything) this endpoint returns.
 export async function authorizeFollowRequest(auth: AuthState, accountId: string): Promise<void> {
-  const res = await fetch(`https://${auth.instance}/api/v1/follow_requests/${accountId}/authorize`, {
+  const res = await fetch(`${apiBase(auth.instance)}/api/v1/follow_requests/${accountId}/authorize`, {
     method: 'POST',
     headers: authHeaders(auth),
   });
@@ -185,7 +186,7 @@ export async function authorizeFollowRequest(auth: AuthState, accountId: string)
 }
 
 export async function rejectFollowRequest(auth: AuthState, accountId: string): Promise<void> {
-  const res = await fetch(`https://${auth.instance}/api/v1/follow_requests/${accountId}/reject`, {
+  const res = await fetch(`${apiBase(auth.instance)}/api/v1/follow_requests/${accountId}/reject`, {
     method: 'POST',
     headers: authHeaders(auth),
   });
@@ -196,7 +197,7 @@ export async function rejectFollowRequest(auth: AuthState, accountId: string): P
 // hide_collections returns an empty 200, so peer screens see [] naturally and
 // can additionally treat a thrown error as "nothing to show".
 export async function fetchConnections(auth: AuthState, accountId: string, kind: ConnectionKind): Promise<Connection[]> {
-  const res = await fetch(`https://${auth.instance}/api/v1/accounts/${accountId}/${kind}?limit=40`, {
+  const res = await fetch(`${apiBase(auth.instance)}/api/v1/accounts/${accountId}/${kind}?limit=40`, {
     headers: authHeaders(auth),
   });
   if (!res.ok) throw new Error(`Could not load ${kind} (${res.status})`);
@@ -204,7 +205,7 @@ export async function fetchConnections(auth: AuthState, accountId: string, kind:
 }
 
 export async function fetchMyAccount(auth: AuthState): Promise<{ id: string; acct: string; locked: boolean }> {
-  const res = await fetch(`https://${auth.instance}/api/v1/accounts/verify_credentials`, {
+  const res = await fetch(`${apiBase(auth.instance)}/api/v1/accounts/verify_credentials`, {
     headers: authHeaders(auth),
   });
   if (!res.ok) throw new Error(`Could not load account (${res.status})`);
@@ -231,7 +232,7 @@ export async function setAccountPrivacy(auth: AuthState, locked: boolean): Promi
     locked: String(locked),
     is_suggestable: String(!locked),
   });
-  const res = await fetch(`https://${auth.instance}/api/v1/accounts/update_credentials`, {
+  const res = await fetch(`${apiBase(auth.instance)}/api/v1/accounts/update_credentials`, {
     method: 'PATCH',
     headers: authHeaders(auth),
     body,

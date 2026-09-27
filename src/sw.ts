@@ -19,8 +19,8 @@ precacheAndRoute(manifest);
 cleanupOutdatedCaches();
 
 // Serve the freshly precached index.html for all navigations so a reload after
-// the new SW takes control loads the new hashed bundle, bypassing the GitHub
-// Pages / browser HTML cache. Precache key is "index.html" (no leading slash).
+// the new SW takes control loads the new hashed bundle, bypassing the browser
+// HTML cache. Precache key is "index.html" (no leading slash).
 // Guarded: in dev mode the manifest is empty and createHandlerBoundToURL would
 // throw at evaluation time, aborting SW registration on the Vite dev server.
 if (manifest.length) {

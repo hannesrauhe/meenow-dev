@@ -1,23 +1,10 @@
-// Push notifications: VAPID subscription registration, permission request, and relay-repo subscription management.
-import { getPushSubFilename, setPushSubFilename, clearPushSubFilename, isPwaInstalled, isPwaSubbed, setPwaSubbed, clearPwaSubbed, getStoredVapidKey, setStoredVapidKey, getSyncedTz, setSyncedTz } from './state';
-
-// These are injected at build time from GitHub repo secrets (VITE_* prefix).
-// Each deployed instance (dev.meenow.de, meenow.de) has its own secret values,
-// which keeps their VAPID keys and subscription sets isolated.
-const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined;
-const PUSH_RELAY_TOKEN = import.meta.env.VITE_PUSH_RELAY_TOKEN as string | undefined;
-const PUSH_RELAY_REPO = 'meenow-de/meenow-push';
-// e.g. 'subscriptions/dev' or 'subscriptions/prod'
-const PUSH_SUBS_PATH = import.meta.env.VITE_PUSH_SUBS_PATH as string | undefined;
+// Push notifications: VAPID subscription registration against the meenow PHP
+// backend (/push/*), permission request, and PWA-context re-subscription.
+import { isPwaInstalled, isPwaSubbed, setPwaSubbed, clearPwaSubbed, getStoredVapidKey, setStoredVapidKey, getSyncedTz, setSyncedTz } from './state';
+import { PUSH_SUBSCRIBE_URL, PUSH_UNSUBSCRIBE_URL, VAPID_KEY_URL } from './config';
 
 function deviceTz(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone;
-}
-
-// Subscription file content: PushSubscription JSON plus the device IANA timezone,
-// which the send script uses to gate ticks to this device's local trigger window.
-function subFileContent(sub: PushSubscription): string {
-  return btoa(JSON.stringify({ ...sub.toJSON(), tz: deviceTz() }));
 }
 
 function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
@@ -27,6 +14,46 @@ function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
+}
+
+// The VAPID public key is served by the backend (not baked into the bundle), so
+// key rotation needs no rebuild. Cached for the session after the first fetch.
+let _vapidKey: string | null | undefined;
+export async function getVapidPublicKey(): Promise<string | null> {
+  if (_vapidKey !== undefined) return _vapidKey;
+  try {
+    const res = await fetch(VAPID_KEY_URL);
+    if (!res.ok) { _vapidKey = null; return null; }
+    const { publicKey } = await res.json() as { publicKey?: string };
+    _vapidKey = typeof publicKey === 'string' && publicKey ? publicKey : null;
+  } catch {
+    _vapidKey = null;
+  }
+  return _vapidKey;
+}
+
+async function registerSubscription(sub: PushSubscription): Promise<boolean> {
+  try {
+    const res = await fetch(PUSH_SUBSCRIBE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...sub.toJSON(), tz: deviceTz() }),
+    });
+    if (res.ok) setSyncedTz(deviceTz());
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function unregisterSubscription(sub: PushSubscription): Promise<void> {
+  try {
+    await fetch(PUSH_UNSUBSCRIBE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: sub.endpoint }),
+    });
+  } catch { /* best-effort; the cron prunes dead endpoints anyway */ }
 }
 
 export function isPushSupported(): boolean {
@@ -46,8 +73,9 @@ export async function isNotificationsEnabled(): Promise<boolean> {
 }
 
 export async function enableNotifications(): Promise<'granted' | 'denied' | 'error'> {
-  if (!VAPID_PUBLIC_KEY || !PUSH_RELAY_TOKEN || !PUSH_SUBS_PATH) {
-    console.error('[notifications] Push config env vars not set');
+  const vapidKey = await getVapidPublicKey();
+  if (!vapidKey) {
+    console.error('[notifications] VAPID public key unavailable');
     return 'error';
   }
 
@@ -61,7 +89,7 @@ export async function enableNotifications(): Promise<'granted' | 'denied' | 'err
     try {
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        applicationServerKey: urlBase64ToUint8Array(vapidKey),
       });
     } catch (err) {
       console.error('[notifications] pushManager.subscribe failed', err);
@@ -69,38 +97,10 @@ export async function enableNotifications(): Promise<'granted' | 'denied' | 'err
     }
   }
 
-  // Reuse the filename written on the previous registration to avoid accumulating
-  // duplicate files in the subscriptions repo for the same browser.
-  const existingFile = getPushSubFilename();
-  if (existingFile) {
-    setStoredVapidKey(VAPID_PUBLIC_KEY);
-    void syncSubscriptionTz();
-    return 'granted';
-  }
+  if (!(await registerSubscription(sub))) return 'error';
 
-  const filename = `${PUSH_SUBS_PATH}/${crypto.randomUUID()}.json`;
-  const content = subFileContent(sub);
-  const res = await fetch(
-    `https://api.github.com/repos/${PUSH_RELAY_REPO}/contents/${filename}`,
-    {
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${PUSH_RELAY_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ message: 'Add subscription', content }),
-    }
-  );
-
-  if (!res.ok) {
-    console.error('[notifications] Failed to register subscription', res.status, await res.text());
-    return 'error';
-  }
-
-  setPushSubFilename(filename);
   isPwaInstalled() ? setPwaSubbed() : clearPwaSubbed();
-  setStoredVapidKey(VAPID_PUBLIC_KEY);
-  setSyncedTz(deviceTz());
+  setStoredVapidKey(vapidKey);
   return 'granted';
 }
 
@@ -110,82 +110,42 @@ export async function enableNotifications(): Promise<'granted' | 'denied' | 'err
 // associated with the standalone context, which makes Android attribute
 // notifications to the installed app instead.
 export async function resubscribeAsPwa(): Promise<void> {
-  if (!VAPID_PUBLIC_KEY || !PUSH_RELAY_TOKEN || !PUSH_SUBS_PATH) return;
+  const vapidKey = await getVapidPublicKey();
+  if (!vapidKey) return;
   try {
     const reg = await navigator.serviceWorker.ready;
     const existing = await reg.pushManager.getSubscription();
-    if (existing) await existing.unsubscribe();
+    if (existing) {
+      await existing.unsubscribe();
+      await unregisterSubscription(existing);
+    }
 
     const sub = await reg.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      applicationServerKey: urlBase64ToUint8Array(vapidKey),
     });
 
-    clearPushSubFilename();
-    const filename = `${PUSH_SUBS_PATH}/${crypto.randomUUID()}.json`;
-    const content = subFileContent(sub);
-    const res = await fetch(
-      `https://api.github.com/repos/${PUSH_RELAY_REPO}/contents/${filename}`,
-      {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${PUSH_RELAY_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ message: 'Add subscription', content }),
-      }
-    );
-
-    if (res.ok) {
-      setPushSubFilename(filename);
+    if (await registerSubscription(sub)) {
       isPwaInstalled() ? setPwaSubbed() : clearPwaSubbed();
-      setStoredVapidKey(VAPID_PUBLIC_KEY);
-      setSyncedTz(deviceTz());
+      setStoredVapidKey(vapidKey);
     }
   } catch {
     // Silent failure — will retry on the next launch.
   }
 }
 
-// Rewrites the relay subscription file when the device timezone differs from the
-// one last written (travel, or a legacy file from before the tz field existed),
-// so the send script gates ticks to the correct local trigger window. Failures
-// are silent and retried on the next launch.
+// Re-registers the current subscription when the device timezone differs from
+// the one last written (travel), so the backend gates ticks to the correct local
+// trigger window. The backend upserts by endpoint, so this just refreshes tz.
+// Failures are silent and retried on the next launch.
 export async function syncSubscriptionTz(): Promise<void> {
-  if (!VAPID_PUBLIC_KEY || !PUSH_RELAY_TOKEN || !PUSH_SUBS_PATH) return;
   if (Notification.permission !== 'granted') return;
-  const filename = getPushSubFilename();
-  if (!filename || getSyncedTz() === deviceTz()) return;
+  if (getSyncedTz() === deviceTz()) return;
   try {
     const reg = await navigator.serviceWorker.ready;
     const sub = await reg.pushManager.getSubscription();
     if (!sub) return;
-
-    const url = `https://api.github.com/repos/${PUSH_RELAY_REPO}/contents/${filename}`;
-    const headers = {
-      'Authorization': `Bearer ${PUSH_RELAY_TOKEN}`,
-      'Content-Type': 'application/json',
-    };
-    // Updating an existing file needs its blob sha; a 404 (pruned by the cron)
-    // falls through to a sha-less PUT that re-creates the file.
-    let sha: string | undefined;
-    const getRes = await fetch(url, { headers });
-    if (getRes.ok) sha = ((await getRes.json()) as { sha?: string }).sha;
-    else {
-      console.log(`meenow: relay subscription GET failed (${getRes.status}) for ${filename}`);
-      if (getRes.status !== 404) return;
-    }
-
-    const res = await fetch(url, {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify({
-        message: 'Update subscription timezone',
-        content: subFileContent(sub),
-        ...(sha && { sha }),
-      }),
-    });
-    if (res.ok) setSyncedTz(deviceTz());
+    await registerSubscription(sub);
   } catch {
     // Silent failure — will retry on the next launch.
   }
@@ -195,21 +155,17 @@ export async function syncSubscriptionTz(): Promise<void> {
 // the VAPID key was rotated or because the subscription was created in a browser
 // tab and needs to be re-created in the installed PWA context.
 // Also bootstraps meenow:vapid-key on first call so future rotations are detectable.
-function shouldResubscribe(): boolean {
-  if (!VAPID_PUBLIC_KEY || Notification.permission !== 'granted') return false;
+async function shouldResubscribe(vapidKey: string): Promise<boolean> {
+  if (Notification.permission !== 'granted') return false;
   const stored = getStoredVapidKey();
-  if (!stored) {
-    // No stored key means we can't verify whether the existing subscription
-    // matches the current key — re-subscribe unconditionally so any previously
-    // rotated key is corrected. setStoredVapidKey is called by resubscribeAsPwa
-    // on success, so it gets recorded after the re-subscribe completes.
-    return true;
-  }
-  if (stored !== VAPID_PUBLIC_KEY) return true;        // key rotated
+  if (!stored) return true;               // can't verify — re-subscribe to record the key
+  if (stored !== vapidKey) return true;   // key rotated
   if (isPwaInstalled() && !isPwaSubbed()) return true; // PWA routing mismatch
   return false;
 }
 
 export async function resubscribeIfNeeded(): Promise<void> {
-  if (shouldResubscribe()) await resubscribeAsPwa();
+  const vapidKey = await getVapidPublicKey();
+  if (!vapidKey) return;
+  if (await shouldResubscribe(vapidKey)) await resubscribeAsPwa();
 }
