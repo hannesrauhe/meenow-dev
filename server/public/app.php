@@ -21,6 +21,7 @@ if (!is_file($appRoot . '/src/bootstrap.php')) {
     exit("cannot locate app root (src/bootstrap.php) — set MEENOW_APP\n");
 }
 require $appRoot . '/src/bootstrap.php';
+require $appRoot . '/src/proxy.php';
 
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 
@@ -83,6 +84,12 @@ function proxy(string $path, ?string $host = null): void
         meenow_json_response(405, ['error' => 'method_not_allowed']);
     }
 
+    // Bodies are small (JSON + a few-MB JPEGs); buffering is fine — except for
+    // multipart, which PHP has already consumed. See proxy_body().
+    [$body, $rebuiltMultipart] = in_array($method, ['GET', 'HEAD'], true)
+        ? [null, false]
+        : proxy_body();
+
     $ch = curl_init($target);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
@@ -91,13 +98,10 @@ function proxy(string $path, ?string $host = null): void
         CURLOPT_TIMEOUT => 120,
         CURLOPT_PROTOCOLS_STR => 'https', // never let the target scheme downgrade
         CURLOPT_FOLLOWLOCATION => false,
-        CURLOPT_HTTPHEADER => proxy_headers(),
+        CURLOPT_HTTPHEADER => proxy_headers($rebuiltMultipart),
         CURLOPT_HEADER => true,
     ]);
-    if ($method !== 'GET' && $method !== 'HEAD') {
-        // Bodies are small (JSON + a few-MB JPEGs); buffering is fine.
-        curl_setopt($ch, CURLOPT_POSTFIELDS, file_get_contents('php://input') ?: '');
-    }
+    if ($body !== null) curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
 
     $response = curl_exec($ch);
     if ($response === false) {
@@ -123,29 +127,6 @@ function proxy(string $path, ?string $host = null): void
         header($m[1] . ': ' . $m[2], true);
     }
     echo $body;
-}
-
-function proxy_headers(): array
-{
-    $out = ['Accept-Encoding: identity']; // keep the body plain so we can forward it verbatim
-    // Apache/PHP expose Content-Type/Length as CONTENT_TYPE/CONTENT_LENGTH, NOT
-    // HTTP_*, so the loop below cannot see them. Without this, JSON POST bodies
-    // (e.g. POST /api/v1/apps) reach upstream as form-encoded and are rejected.
-    if (!empty($_SERVER['CONTENT_TYPE'])) {
-        $out[] = 'Content-Type: ' . $_SERVER['CONTENT_TYPE'];
-    }
-    foreach ($_SERVER as $k => $v) {
-        if (!str_starts_with($k, 'HTTP_')) continue;
-        $name = strtolower(str_replace('_', '-', substr($k, 5)));
-        // Strip cookies + host + anything that would let a client pivot the request.
-        // accept-encoding is stripped so our identity default is the only one sent.
-        if (in_array($name, ['cookie', 'host', 'origin', 'referer', 'accept-encoding',
-                             'x-forwarded-for', 'x-forwarded-host'], true)) continue;
-        $out[] = $name . ': ' . $v;
-    }
-    // Content-Type for bodies that arrive without an HTTP_ header (rare) is
-    // already covered by PHP's normalisation above.
-    return $out;
 }
 
 function push(string $path): void

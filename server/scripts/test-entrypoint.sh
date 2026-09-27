@@ -43,6 +43,7 @@ php -S 127.0.0.1:8080 scripts/router.php > /tmp/websrv.log 2>&1 &
 WEB=$!
 sleep 2
 H() { php scripts/http.php "$@"; }
+H2() { php scripts/http-multipart.php "$@"; }
 
 check "health" '"ok":true' "$(H GET http://127.0.0.1:8080/health)"
 check "cron bad key" 'bad_key' "$(H GET 'http://127.0.0.1:8080/cron?key=nope')"
@@ -71,6 +72,13 @@ check "proxy /i not allowed" 'not_found' "$(MEENOW_AUTH='Bearer t' H GET http://
 # form-encoded and rejects with 422 "client_name field is required").
 check "proxy JSON POST" '"client_id"' "$(H POST http://127.0.0.1:8080/api/v1/apps \
   "{\"client_name\":\"meenow-test-$$\",\"redirect_uris\":\"http://127.0.0.1:8080/\",\"scopes\":\"read\"}")"
+# Regression: multipart POST bodies (media uploads). PHP consumes them into
+# $_POST/$_FILES and leaves php://input empty, so a raw-stream relay sends an
+# empty form upstream — Pixelfed 422s "client_name field is required". The
+# proxy must rebuild the form; the apps endpoint proves the fields arrive.
+head -c 20000 /dev/urandom > /tmp/upload.jpg
+check "proxy multipart POST" '"client_id"' "$(H2 http://127.0.0.1:8080/api/v1/apps \
+  /tmp/upload.jpg client_name=meenow-mp-test-$$ redirect_uris=http://127.0.0.1:8080/ scopes=read)"
 # xkcd: on-demand endpoint populates the cache on first hit, serves it after.
 rm -f /tmp/xkcd.json
 check "xkcd fetch" '"num"' "$(H GET http://127.0.0.1:8080/xkcd.json)"
@@ -93,6 +101,12 @@ check "rate limiter" "STATUS 429" "$RL"
 
 kill $WEB 2>/dev/null || true
 rm -f config/config.php config/vapid.json
+
+# Proxy body/header unit tests (no server needed — they inspect what curl would
+# be handed; this is where the multipart 422 regression is pinned down).
+UT=$(php scripts/test-proxy-body.php 2>&1) && check "proxy unit tests" "FAIL=0" "$UT" \
+  || bad "proxy unit tests" "$UT"
+
 echo
 echo "PASS=$PASS FAIL=$FAIL"
 [ $FAIL -eq 0 ]
