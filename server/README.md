@@ -13,6 +13,9 @@ shared host. It lives inside the app repo as `server/`. Two jobs:
    `/push/unsubscribe`, both behind the same Bearer-token gate as the proxy;
    `/push/public-key` stays open) and a timezone-gated daily tick sent from the
    URL-cron.
+3. **Bootstrap groups** — `/groups/*` stores membership of small named circles
+   so a new user can follow everyone in one tap (see *Bootstrap groups* below).
+   Operator-created; no UI for creating them.
 
 ## Layout
 
@@ -22,12 +25,12 @@ One directory per instance; the domain points at its `public/` subdir, so
 ```
 <instance>/            one directory per deployment (e.g. meenow.de/, dev.meenow.de/)
   public/     ← domain docroot: PWA build (index.html…) + app.php router + .htaccess + .user.ini
-  src/        PHP app (bootstrap, proxy, push, tick, trigger math, xkcd cache)
-  scripts/    gen-vapid.php, smoke.php, parity-test.{php,mjs}, test-local.sh
+  src/        PHP app (bootstrap, proxy, push, groups, tick, trigger math, xkcd cache)
+  scripts/    gen-vapid.php, groups.php, smoke.php, parity-test.{php,mjs}, test-local.sh
   config/     config.php + vapid.json — SERVER-ONLY, never committed/overwritten
   cache/      xkcd cache — server-owned
   vendor/     composer install --no-dev output — server-owned
-  schema.sql  MySQL tables (subscriptions, rate_hits, cron_slots)
+  schema.sql  MySQL tables (subscriptions, rate_hits, cron_slots, groups, group_members)
   VERSION     installed build id (written by install.sh)
   install.sh  the installer (self-updating: each release ships the current one)
   .install.conf  REPO=owner/name (+ optional GITHUB_TOKEN) — server-owned
@@ -101,14 +104,45 @@ an existing table). Example, the `subscriptions.account` column:
 ],
 ```
 
+## Bootstrap groups
+
+A group is a name plus a slug id, stored in `groups` / `group_members`, whose
+only job is cold-starting a follower circle: a new user opens an invite link
+(`/?group=<id>`), the app follows every member, and the user is added to the
+roster for whoever joins next. Afterwards the group is inert — the circle lives
+on the instances, and leaving a group never unfollows anyone.
+
+Members are keyed on the self-asserted `"<instance>:<accountId>"` string (plus
+their `user@instance` handle, which is what lets joiners resolve and follow
+them). Same attribution posture as `subscriptions.account`: the Bearer token is
+required but validated by the instance, not here, so a determined bad actor can
+plant a member row. Accepted for a bootstrap device in a small community.
+
+Creation is operator-only — there is deliberately no create UI or admin
+endpoint:
+
+```
+php scripts/groups.php create crew "Weekend crew"
+php scripts/groups.php add crew pixelfed.social:123 alice@pixelfed.social
+php scripts/groups.php list            # members per group
+php scripts/groups.php members crew
+php scripts/groups.php remove crew pixelfed.social:123
+php scripts/groups.php delete crew     # group + all members
+```
+
+Seeding the founding members with `add` is what makes a group useful before
+anyone has joined it; everyone after that arrives through the app. Invite links
+are `https://meenow.de/?group=<id>` — no expiry, no single-use, the link only
+carries the id and joining still requires the member to approve the follow.
+
 ## Testing
 
 `bash scripts/test-local.sh` (Docker only — MariaDB + PHP 8.3, no local config
 or DB needed) runs the full suite: endpoints, proxy routing and the auth gate,
-JSON + multipart body relay, cron, rate limiter, plus the proxy body/header unit
-tests (`scripts/test-proxy-body.php`). The proxy checks hit the live home
-instance, so it needs internet. Run it after touching `public/app.php` or
-`src/proxy.php`.
+JSON + multipart body relay, groups join/leave, cron, rate limiter, plus the
+proxy body/header unit tests (`scripts/test-proxy-body.php`). The proxy checks
+hit the live home instance, so it needs internet. Run it after touching
+`public/app.php`, `src/proxy.php` or `src/groups.php`.
 
 ## Trigger-math parity
 

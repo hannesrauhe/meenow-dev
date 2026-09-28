@@ -28,6 +28,7 @@ export function apiBase(instance: string): string {
 }
 
 // Same-origin endpoints served by the PHP backend.
+export const GROUPS_URL = '/groups';
 export const PUSH_SUBSCRIBE_URL = '/push/subscribe';
 export const PUSH_UNSUBSCRIBE_URL = '/push/unsubscribe';
 export const VAPID_KEY_URL = '/push/public-key';

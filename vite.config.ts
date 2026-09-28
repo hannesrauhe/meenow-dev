@@ -20,6 +20,7 @@ export default defineConfig(() => ({
       '/i': PHP_BACKEND,
       '/oauth/token': PHP_BACKEND,
       '/push': PHP_BACKEND,
+      '/groups': PHP_BACKEND,
       '/xkcd.json': PHP_BACKEND,
       '/health': PHP_BACKEND,
     },

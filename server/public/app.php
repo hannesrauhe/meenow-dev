@@ -6,6 +6,7 @@ declare(strict_types=1);
 //   /api/*, /oauth/token       -> proxy to the home instance (the CORS killer)
 //   /i/<instance>/api/* etc.   -> proxy to an allowlisted second instance
 //   /push/*                    -> Web Push subscription store
+//   /groups/*                  -> bootstrap group membership
 //   /xkcd.json                 -> cached xkcd mirror (refresh-on-request)
 //   /cron                      -> URL-cron entry point (daily tick)
 //   /health                    -> liveness probe
@@ -35,6 +36,7 @@ match (true) {
     preg_match('#^/i/([a-z0-9.-]+)(/api/.*|/oauth/token)$#', $path, $m) === 1 => proxy_instance($m[1], $m[2]),
     str_starts_with($path, '/api/') || $path === '/oauth/token' => proxy($path),
     str_starts_with($path, '/push/') => push($path),
+    str_starts_with($path, '/groups/') => (require $appRoot . '/src/groups.php')($path),
     default => meenow_json_response(404, ['error' => 'not_found']),
 };
 

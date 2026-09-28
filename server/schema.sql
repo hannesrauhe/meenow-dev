@@ -37,3 +37,26 @@ CREATE TABLE IF NOT EXISTS cron_slots (
     ran_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (slot, action)
 ) ENGINE=InnoDB;
+
+-- Bootstrap groups: named circles the operator creates (scripts/groups.php) so
+-- a new user can join one via an invite link, have the app follow every member,
+-- and become a member themselves. Pure bootstrap device — the follower circle
+-- itself lives on the instance, not here. `groups` is a MySQL reserved word.
+CREATE TABLE IF NOT EXISTS `groups` (
+    id         VARCHAR(64) NOT NULL PRIMARY KEY, -- slug carried in invite links
+    name       VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Membership, keyed on the self-asserted "<instance>:<accountId>" string (same
+-- attribution model as subscriptions.account — not a credential). acct holds
+-- the fediverse handle (user@instance) so joiners can resolve and follow the
+-- member even across instances.
+CREATE TABLE IF NOT EXISTS group_members (
+    group_id   VARCHAR(64)  NOT NULL,
+    account    VARCHAR(191) NOT NULL,
+    acct       VARCHAR(191) NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (group_id, account),
+    KEY account (account)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

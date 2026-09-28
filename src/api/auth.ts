@@ -1,5 +1,5 @@
 // OAuth PKCE auth: client registration, login flow, token/accountId storage, and auth state helpers.
-import { clearLockedApplied, clearPendingAdd } from '../state';
+import { clearLockedApplied, clearPendingAdd, clearPendingGroup } from '../state';
 import { apiBase } from '../config';
 import { idbDelete, IDB_KEYS } from '../idb';
 
@@ -160,6 +160,7 @@ export function clearAuth(): void {
   localStorage.removeItem(`${PREFIX}pending-instance`);
   localStorage.removeItem(`${PREFIX}verifier`);
   clearPendingAdd();
+  clearPendingGroup();
   localStorage.removeItem('meenow:pwa-subbed');
   // Drop the SW's mirrored auth, engagement-digest and daily-reminder state.
   void idbDelete(IDB_KEYS.auth);

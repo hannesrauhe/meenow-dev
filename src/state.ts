@@ -93,6 +93,20 @@ export function clearPendingAdd(): void {
   localStorage.removeItem('meenow:pending-add');
 }
 
+// A group id from an invite deep link (?group=), carried through the OAuth
+// redirect exactly like pending-add above.
+export function getPendingGroup(): string | null {
+  return localStorage.getItem('meenow:pending-group');
+}
+
+export function setPendingGroup(id: string): void {
+  localStorage.setItem('meenow:pending-group', id);
+}
+
+export function clearPendingGroup(): void {
+  localStorage.removeItem('meenow:pending-group');
+}
+
 export function isInstallDismissed(): boolean {
   const raw = localStorage.getItem('meenow:install-dismiss');
   if (!raw) return false;

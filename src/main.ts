@@ -4,7 +4,7 @@ declare const __GIT_HASH__: string;
 import './style.css';
 import { getAuthState, handleOAuthCallback, dropTokenIfScopesStale } from './api/auth';
 import { getLastTriggerTime, type AppState } from './timer';
-import { MAX_POSTS_PER_TRIGGER, getPendingAdd, setPendingAdd, clearPendingAdd, clearPwaSubbed } from './state';
+import { MAX_POSTS_PER_TRIGGER, getPendingAdd, setPendingAdd, clearPendingAdd, getPendingGroup, setPendingGroup, clearPendingGroup, clearPwaSubbed } from './state';
 import { fetchTodayPostCount, deletePost, removePostFromCache, resetMyPostsPagerIfStale } from './api/pixelfed';
 import type { Connection } from './api/social';
 import { renderCapture, stopCaptureStreams } from './screens/capture';
@@ -13,6 +13,7 @@ import { renderGrid } from './screens/grid';
 import { renderCircle } from './screens/circle';
 import { renderPeerConnections } from './screens/peerConnections';
 import { renderConnectLanding } from './screens/connectLanding';
+import { renderGroupJoin } from './screens/groupJoin';
 import { renderLogin } from './screens/login';
 import { renderPostDetail } from './screens/postDetail';
 import type { FeedPost } from './api/pixelfed';
@@ -23,7 +24,7 @@ import { idbSet, IDB_KEYS } from './idb';
 import { resubscribeIfNeeded, syncSubscriptionTz, clearAppBadge, closeDailyNotification } from './notifications';
 
 const app = document.getElementById('app')!;
-type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'grid' | 'circle' | 'peer' | 'connect';
+type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'grid' | 'circle' | 'peer' | 'connect' | 'group_join';
 const BASE_SCREENS = new Set<Screen>(['feed', 'login']);
 let activeScreen: Screen | null = null;
 let tickId: number | null = null;
@@ -370,6 +371,22 @@ function mountConnectLanding(handle: string): void {
   app.appendChild(renderConnectLanding(auth, handle, () => { history.back(); }));
 }
 
+function mountGroupJoin(groupId: string): void {
+  const auth = getAuthState();
+  if (!auth) return;
+  activeScreen = 'group_join';
+  app.innerHTML = '';
+  removeInstallNudge();
+  removeNotificationNudge();
+
+  history.pushState({ screen: 'group_join' }, '');
+
+  const onPopState = () => { activeScreen = null; tick(); };
+  window.addEventListener('popstate', onPopState, { once: true });
+
+  app.appendChild(renderGroupJoin(auth, groupId, () => { history.back(); }));
+}
+
 function mount(screen: AppState | 'login'): void {
   app.innerHTML = '';
   if (screen === 'login') {
@@ -426,9 +443,10 @@ async function init(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
   const code = params.get('code');
   const add = params.get('add');
+  const group = params.get('group');
   // Set by the daily-reminder notification tap (issue #56) to open capture.
   const action = params.get('action');
-  if (code || add || action) {
+  if (code || add || group || action) {
     history.replaceState({}, '', window.location.pathname);
   }
   if (code) {
@@ -439,8 +457,10 @@ async function init(): Promise<void> {
     }
   }
   // Persist an invite handle so it survives the OAuth redirect (redirect_uri has
-  // no query string); it is consumed below once authenticated.
+  // no query string); it is consumed below once authenticated. Same for a group
+  // invite (?group=<id>).
   if (add) setPendingAdd(add);
+  if (group) setPendingGroup(group);
 
   // One-time migration: tokens minted before the `follow` scope was requested
   // can't perform relationship writes, so drop them and let the login screen
@@ -498,8 +518,14 @@ async function init(): Promise<void> {
 
   // Once authenticated and the feed is up, open the invite landing for any
   // handle carried in via ?add= (directly, or through the login redirect).
+  // A pending group join takes precedence (it is the onboarding fast path for a
+  // fresh account); the pending add survives to the next load.
+  const pendingGroup = getPendingGroup();
   const pendingAdd = getPendingAdd();
-  if (pendingAdd && getAuthState()) {
+  if (pendingGroup && getAuthState()) {
+    clearPendingGroup();
+    mountGroupJoin(pendingGroup);
+  } else if (pendingAdd && getAuthState()) {
     clearPendingAdd();
     mountConnectLanding(pendingAdd);
   }

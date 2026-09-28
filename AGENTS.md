@@ -116,6 +116,49 @@ meenow posts are `visibility: "private"` (followers-only), so a user only sees a
 - **Invite links** are `<origin>/?add=user@instance` deep links (no backend, no expiry/single-use — the link only carries a handle, and following still requires approval). The handle is built federation-safe (bare local `acct` gets `@<instance>` appended). `init()` in `main.ts` parses `?add=` alongside the OAuth `code`, strips it with `replaceState`, and persists it to `meenow:pending-add` **before** any redirect — necessary because `redirect_uri` is `origin + pathname` with no query, so the handle would otherwise be lost across the OAuth round-trip when the recipient is logged out. After authentication the pending handle is consumed and `mountConnectLanding` opens `src/screens/connectLanding.ts`, which resolves the handle and offers a one-tap connect (with self-add and not-found states).
 - **Pending-request badge**: the feed header's circle icon gets a small gold dot when `fetchPendingRequestCount(auth) > 0` (checked on feed mount; the count cache is invalidated on accept/reject so the badge refreshes when the user returns to the feed). The source of truth is `/follow_requests`, not notification parsing, because Pixelfed's `follow_request` notification emission is version-dependent. (The push-notification digest in `src/api/engagement.ts` does **not** yet count `follow`/`follow_request` — that is a deliberate phase-2 follow-up.)
 
+## Bootstrap groups
+
+A group is a name plus a slug id whose **only** purpose is cold-starting a
+follower circle: a new user opens an invite link, follows everyone in the group
+in one tap, and is added to the roster for whoever joins next. Afterwards the
+group is inert — the circle itself lives on the instances, and leaving a group
+never unfollows anyone. Users can be in multiple groups.
+
+- **Server side** (`server/src/groups.php`, one `match` arm in `app.php`):
+  `groups` + `group_members` tables, `GET /groups/mine?account=`,
+  `GET /groups/<id>` (name + members), `POST /groups/<id>/join` and `/leave`.
+  Same Bearer-presence gate as `/push/*` (401 without `Authorization`, token
+  validated by the instance, not here) plus the per-IP rate limit. Membership is
+  keyed on the self-asserted `"<instance>:<accountId>"` string, with the
+  `user@instance` handle stored alongside because that is what lets a joiner
+  resolve and follow the member across instances. Join is idempotent and
+  refreshes `acct`, so an account rename self-heals. **Accepted weakness:** the
+  account string is self-asserted (same posture as `subscriptions.account`), so
+  a bad actor can plant a member row that later joiners would follow — fine for
+  a bootstrap device in a small community, revisit if groups ever become public.
+- **Creation is operator-only** via `server/scripts/groups.php` (CLI:
+  `create`/`delete`/`list`/`members`/`add`/`remove`). There is deliberately no
+  create UI, no admin endpoint, and no public group listing — discovery is
+  invite links only. Seeding founding members with `add` is what makes a group
+  useful before anyone joins it.
+- **Client side** (`src/api/groups.ts`, `src/screens/groupJoin.ts`): the screen
+  resolves each member to a followable id (local ids directly, remote handles
+  via `resolveHandle`), batch-skips the already-connected with
+  `fetchRelationships`, then follows sequentially (circles are <20) and tolerates
+  per-member failures. "Follow all" joins **first** so the joiner enters the
+  roster for the next person. Because members are auto-locked accounts, the
+  follows arrive in their Circle inbox as one-tap `acceptAndBackFollow`s — that
+  is the whole bootstrap mechanism.
+- **Entry points**: `?group=<id>` deep link → `mountGroupJoin` (copies the
+  `mountConnectLanding` pattern), carried across OAuth in `meenow:pending-group`
+  exactly like `meenow:pending-add`. A pending group **takes precedence** over a
+  pending add (it is the onboarding fast path for a fresh account; the add
+  survives to the next load). The Circle screen shows a Groups section (share
+  link + two-tap Leave) only when `fetchMyGroups` returns something, and the
+  call is fail-soft, so backend trouble simply hides the section.
+- **Avatars**: the backend never talks to the instance, so it stores no avatars.
+  Group rows render a deterministic SVG-initial placeholder built client-side.
+
 ## Automatic archiving of old posts
 
 Posts older than the last trigger time are automatically archived on Pixelfed (hidden from other users) via the Pixelfed-specific `POST /api/v1.1/archive/add/:id` endpoint. Archiving is fire-and-forget: failures are silently swallowed, and on non-Pixelfed instances the calls are no-ops.

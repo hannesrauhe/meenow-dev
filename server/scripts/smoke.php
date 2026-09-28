@@ -32,8 +32,8 @@ check('config readable', function () {
 
 check('db connect + schema', function () {
     $pdo = meenow_db();
-    foreach (['subscriptions', 'rate_hits', 'cron_slots'] as $t) {
-        $pdo->query("SELECT 1 FROM {$t} LIMIT 1");
+    foreach (['subscriptions', 'rate_hits', 'cron_slots', 'groups', 'group_members'] as $t) {
+        $pdo->query("SELECT 1 FROM `{$t}` LIMIT 1"); // backticks: `groups` is reserved
     }
     return 'tables present';
 });

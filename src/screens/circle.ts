@@ -13,6 +13,7 @@ import {
 import { isLockedApplied, setLockedApplied } from '../state';
 import { makeAccountRow } from '../components/accountRow';
 import { makeConnectButton } from '../components/connectButton';
+import { fetchMyGroups, leaveGroup, type Group } from '../api/groups';
 
 export function renderCircle(
   auth: AuthState,
@@ -77,12 +78,15 @@ async function loadCircle(
   let requests: Connection[];
   let following: Connection[];
   let followers: Connection[];
+  let groups: Group[];
   try {
-    [requests, following, followers] = await Promise.all([
+    [requests, following, followers, groups] = await Promise.all([
       fetchFollowRequests(auth),
       fetchConnections(auth, account.id, 'following'),
       // Fail-soft: an unreadable follower list must never hide the inbox.
       fetchConnections(auth, account.id, 'followers').catch(() => []),
+      // Fail-soft too: no backend reachability simply hides the Groups section.
+      fetchMyGroups(auth),
     ]);
   } catch {
     showError(container, () => loadCircle(container, auth, onOpenPeer));
@@ -106,6 +110,9 @@ async function loadCircle(
 
   container.innerHTML = '';
   container.appendChild(makeInviteBlock(inviteHandle));
+  if (groups.length > 0) {
+    container.appendChild(makeGroupsSection(auth, groups, () => loadCircle(container, auth, onOpenPeer)));
+  }
   if (requests.length > 0) {
     container.appendChild(makeRequestsSection(auth, requests, () => loadCircle(container, auth, onOpenPeer)));
   }
@@ -154,6 +161,79 @@ function makeInviteBlock(handle: string): HTMLElement {
   wrap.appendChild(hint);
 
   return wrap;
+}
+
+// Bootstrap groups the user has joined (see server/src/groups.php). Offers the
+// same invite link for the group and a two-tap leave; the circle itself is
+// unaffected by leaving — the group is only the bootstrap roster.
+function makeGroupsSection(auth: AuthState, groups: Group[], reload: () => void): HTMLElement {
+  const section = document.createElement('div');
+  section.className = 'border-b border-ink/8';
+  section.appendChild(makeSectionHeading(`Groups · ${groups.length}`));
+
+  for (const g of groups) {
+    const { row, actions } = makeAccountRow({
+      displayName: g.name,
+      handle: g.id,
+      avatarUrl: GROUP_AVATAR,
+    });
+
+    const shareBtn = document.createElement('button');
+    shareBtn.className = 'text-xs rounded-full px-3 py-1.5 border border-gold/40 text-gold';
+    shareBtn.textContent = 'Invite';
+    shareBtn.addEventListener('click', () => void shareGroup(g.id, shareBtn));
+    actions.appendChild(shareBtn);
+
+    const leaveBtn = document.createElement('button');
+    leaveBtn.className = 'text-xs rounded-full px-3 py-1.5 border border-ink/10 text-ink/30';
+    leaveBtn.textContent = 'Leave';
+    let confirming = false;
+    leaveBtn.addEventListener('click', () => {
+      if (!confirming) {
+        confirming = true;
+        leaveBtn.textContent = 'Sure?';
+        leaveBtn.className = 'text-xs rounded-full px-3 py-1.5 border border-gold/40 text-gold';
+        window.setTimeout(() => {
+          if (!confirming || !leaveBtn.isConnected) return;
+          confirming = false;
+          leaveBtn.textContent = 'Leave';
+          leaveBtn.className = 'text-xs rounded-full px-3 py-1.5 border border-ink/10 text-ink/30';
+        }, 3000);
+        return;
+      }
+      leaveBtn.disabled = true;
+      void leaveGroup(auth, g.id).then(reload).catch(() => {
+        leaveBtn.disabled = false;
+        leaveBtn.textContent = 'Try again';
+      });
+    });
+    actions.appendChild(leaveBtn);
+
+    section.appendChild(row);
+  }
+  return section;
+}
+
+const GROUP_AVATAR = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72"><rect width="72" height="72" rx="36" fill="#F3E8D0"/><circle cx="28" cy="30" r="9" fill="#B08947"/><circle cx="45" cy="33" r="7" fill="#B08947" opacity="0.7"/><path d="M14 56c2-10 10-14 14-14s12 4 14 14z" fill="#B08947"/><path d="M38 56c1-7 5-10 7-10s6 3 7 10z" fill="#B08947" opacity="0.7"/></svg>',
+)}`;
+
+async function shareGroup(groupId: string, btn: HTMLButtonElement): Promise<void> {
+  const url = `${window.location.origin}/?group=${encodeURIComponent(groupId)}`;
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: 'meenow', text: 'Join this meenow group', url });
+      return;
+    } catch { /* user cancelled or share failed — fall back to copy */ }
+  }
+  const original = btn.textContent;
+  try {
+    await navigator.clipboard.writeText(url);
+    btn.textContent = 'Copied';
+  } catch {
+    btn.textContent = 'Copy failed';
+  }
+  window.setTimeout(() => { btn.textContent = original; }, 2000);
 }
 
 async function shareInvite(handle: string, btn: HTMLButtonElement): Promise<void> {

@@ -105,6 +105,33 @@ check "xkcd fetch" '"num"' "$(H GET http://127.0.0.1:8080/xkcd.json)"
 check "xkcd cached" '"num"' "$(H GET http://127.0.0.1:8080/xkcd.json)"
 check "unknown path 404" 'not_found' "$(H GET http://127.0.0.1:8080/admin)"
 
+# --- bootstrap groups -----------------------------------------------------
+# The Bearer token is not validated here (the instance does that), so a dummy
+# one exercises the endpoints. Budget clears: this config caps at 5 req/min.
+CLR() { php -r '$c=require "config/config.php"; $p=new PDO("mysql:host=".$c["db"]["host"].";dbname=".$c["db"]["name"], $c["db"]["user"], $c["db"]["pass"]); $p->exec("DELETE FROM rate_hits");'; }
+GOUT=$(php scripts/groups.php create test "Test group" 2>&1) && ok "groups CLI create" || bad "groups CLI create" "$GOUT"
+GOUT=$(php scripts/groups.php add test pixelfed.social:1 alice@pixelfed.social 2>&1) && ok "groups CLI add" || bad "groups CLI add" "$GOUT"
+check "groups 401 no auth" 'authorization_required' "$(H GET http://127.0.0.1:8080/groups/test)"
+CLR
+check "groups show" 'alice@pixelfed.social' "$(MEENOW_AUTH='Bearer t' H GET http://127.0.0.1:8080/groups/test)"
+check "groups join" '"ok":true' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/join \
+  '{"account":"pixelfed.social:7","acct":"bob@pixelfed.social"}')"
+check "groups join idempotent" '"ok":true' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/join \
+  '{"account":"pixelfed.social:7","acct":"bob@pixelfed.social"}')"
+check "groups mine" '"test"' "$(MEENOW_AUTH='Bearer t' H GET 'http://127.0.0.1:8080/groups/mine?account=pixelfed.social:7')"
+check "groups leave" '"ok":true' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/leave \
+  '{"account":"pixelfed.social:7"}')"
+CLR
+check "groups leave removed" '"groups":[]' "$(MEENOW_AUTH='Bearer t' H GET 'http://127.0.0.1:8080/groups/mine?account=pixelfed.social:7')"
+check "groups join unknown" 'group_not_found' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/nope/join \
+  '{"account":"pixelfed.social:7","acct":"bob@pixelfed.social"}')"
+check "groups join bad account" 'invalid_account' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/join \
+  '{"account":"not-an-account"}')"
+# The joiner is gone but the seeded founding member remains.
+GMEM=$(php scripts/groups.php members test 2>&1)
+check "groups CLI members" 'alice@pixelfed.social' "$GMEM"
+case "$GMEM" in *bob*) bad "groups leave via CLI view" "bob still present: $GMEM";; *) ok "groups leave removed (CLI view)";; esac
+
 # Cron: tick runs (1 sub left), immediate rerun dedupes.
 check "cron tick" '"subscriptions":1' "$(H GET 'http://127.0.0.1:8080/cron?action=tick&key=testkey123')"
 check "cron dedupe" 'slot already ran' "$(H GET 'http://127.0.0.1:8080/cron?action=tick&key=testkey123')"
