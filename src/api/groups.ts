@@ -64,23 +64,24 @@ export type GroupApiErrorCode =
 
 export class GroupApiError extends Error {
   readonly code: GroupApiErrorCode;
-  constructor(code: GroupApiErrorCode, status: number) {
+  // The server's real error text, present only when its config has debug=true.
+  // Screens show it verbatim so a failure is readable without server logs.
+  readonly debug?: string;
+  constructor(code: GroupApiErrorCode, status: number, debug?: string) {
     super(`groups: ${code} (${status})`);
     this.code = code;
+    this.debug = debug;
   }
 }
 
-// Map a failed response onto a code. The body is JSON on every path we care
-// about; anything unrecognisable becomes `unknown` and renders as a generic
-// failure rather than being guessed at.
 async function groupError(res: Response): Promise<GroupApiError> {
-  const body = await res.json().catch(() => null) as { error?: string } | null;
+  const body = await res.json().catch(() => null) as { error?: string; debug?: string } | null;
   const code = (body?.error ?? '') as GroupApiErrorCode;
   const known: GroupApiErrorCode[] = [
     'invite_not_found', 'invite_expired', 'invite_exhausted', 'invite_required',
     'banned', 'not_member', 'not_admin', 'group_not_found',
   ];
-  return new GroupApiError(known.includes(code) ? code : 'unknown', res.status);
+  return new GroupApiError(known.includes(code) ? code : 'unknown', res.status, body?.debug);
 }
 
 function authHeaders(auth: AuthState): HeadersInit {

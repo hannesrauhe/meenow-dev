@@ -64,4 +64,9 @@ return [
     // claim to be the admin and remove people. Turn off only where no real
     // instance is reachable (the Docker test suite runs on dummy tokens).
     'verify_group_accounts' => true,
+
+    // Echo real errors (class, message, file:line) in API responses so the app
+    // shows them on screen — no server log needed. NEVER on production: it
+    // leaks paths and query internals.
+    // 'debug' => true,
 ];

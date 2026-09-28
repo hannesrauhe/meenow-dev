@@ -66,10 +66,12 @@ async function loadGroup(
 
   let invite: RedeemedInvite | null = null;
   let failure = '';
+  let err: unknown = null;
   try {
     invite = await redeemInvite(auth, token);
-  } catch (err) {
-    failure = err instanceof GroupApiError ? err.code : 'unknown';
+  } catch (e) {
+    err = e;
+    failure = e instanceof GroupApiError ? e.code : 'unknown';
   }
   if (!container.isConnected) return;
 
@@ -81,7 +83,9 @@ async function loadGroup(
       ? 'This invite has run out. Ask someone in the group for a fresh link.'
       : failure === 'banned'
         ? 'You can’t join this group.'
-        : 'This group link is no longer valid.';
+        : err instanceof GroupApiError && err.debug
+          ? err.debug
+          : 'This group link is no longer valid.';
     // Only a network failure is worth retrying; a dead token stays dead.
     const retryable = failure === 'unknown';
     renderMessage(container, message, onDone, retryable
@@ -258,6 +262,7 @@ function joinFailure(err: unknown): string {
     if (err.code === 'invite_expired' || err.code === 'invite_exhausted') {
       return 'This invite has run out. Ask for a fresh link.';
     }
+    if (err.debug) return err.debug; // server debug mode: show the real error
   }
   return '';
 }

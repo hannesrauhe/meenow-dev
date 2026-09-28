@@ -64,9 +64,10 @@ async function load(container: HTMLElement, auth: AuthState, groupId: string): P
   } catch (err) {
     if (!container.isConnected) return;
     const gone = err instanceof GroupApiError && err.code === 'group_not_found';
+    const debug = err instanceof GroupApiError ? err.debug : undefined;
     renderMessage(container, gone
       ? 'This group no longer exists.'
-      : 'Could not load the group.', () => load(container, auth, groupId));
+      : debug ?? 'Could not load the group.', () => load(container, auth, groupId));
     return;
   }
   if (!container.isConnected) return;
@@ -159,9 +160,10 @@ function memberRow(
     btn.textContent = '…';
     // Awaited before reloading on purpose: a removed row that reappears because
     // the request was still in flight is worse than a momentary spinner.
-    void removeMember(auth, groupId, m.account).then(reload).catch(() => {
+    void removeMember(auth, groupId, m.account).then(reload).catch((err) => {
       btn.disabled = false;
       btn.textContent = 'Try again';
+      showDebug(container, err);
     });
   });
 
@@ -184,9 +186,10 @@ function banRow(auth: AuthState, groupId: string, b: GroupBan, reload: () => voi
     btn.textContent = '…';
     // Lifting the block only: they come back the way anyone does, through a fresh
     // invite link — which is also what shows they still want in.
-    void unbanMember(auth, groupId, b.account).then(reload).catch(() => {
+    void unbanMember(auth, groupId, b.account).then(reload).catch((err) => {
       btn.disabled = false;
       btn.textContent = 'Try again';
+      showDebug(container, err);
     });
   });
   actions.appendChild(btn);
@@ -200,12 +203,28 @@ function makeSectionHeading(text: string): HTMLElement {
   return h;
 }
 
+// Server debug mode: append the real error under the roster. No-op unless the
+// response carried debug text.
+function showDebug(container: HTMLElement, err: unknown): void {
+  if (!(err instanceof GroupApiError) || !err.debug) return;
+  let box = container.querySelector('#debug-error');
+  if (!box) {
+    box = document.createElement('p');
+    box.id = 'debug-error';
+    box.className = 'text-xs text-red-600 font-mono px-6 py-3 break-all whitespace-pre-wrap';
+    container.appendChild(box);
+  }
+  box.textContent = err.debug;
+}
+
 function renderMessage(container: HTMLElement, message: string, retry: () => void): void {
   container.innerHTML = `
     <div class="flex flex-col items-center py-16 gap-3 text-center px-6">
-      <p class="text-sm text-ink/50">${message}</p>
+      <p class="text-sm text-ink/50"></p>
     </div>
   `;
+  // textContent, not innerHTML: `message` can be raw server error text.
+  container.querySelector('p')!.textContent = message;
   const btn = document.createElement('button');
   btn.className = 'block mx-auto text-sm text-gold underline underline-offset-2';
   btn.textContent = 'Retry';

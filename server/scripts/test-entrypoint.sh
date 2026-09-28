@@ -32,7 +32,10 @@ $cfg = ["home_instance" => "pixelfed.social",
   // about invites, admin and bans is exercised for real.
   "verify_group_accounts" => false,
   "invite_ttl_s" => 14400,
-  "invite_max_uses" => 5];
+  "invite_max_uses" => 5,
+  // Lets the last checks prove errors surface in the response body (the app
+  // shows this text so failures are debuggable without server logs).
+  "debug" => true];
 file_put_contents("/app/config/config.php", "<?php return " . var_export($cfg, true) . ";");'
 [ -s config/config.php ] && ok "config written" || bad "config written" "empty"
 
@@ -235,6 +238,15 @@ check "prune removed expired only" '0' "$LEFT"
 check "groups CLI ban" 'banned' "$(php scripts/groups.php ban test pixelfed.social:8 carol@pixelfed.social 2>&1)"
 check "groups CLI unban" 'unbanned' "$(php scripts/groups.php unban test pixelfed.social:8 2>&1)"
 check "groups CLI list admin" 'admin=pixelfed.social:1' "$(php scripts/groups.php list 2>&1)"
+
+# --- debug mode: errors reach the response body (the app shows them) --------
+DBG=$(php -r 'require "src/bootstrap.php"; meenow_debug_handlers(); throw new RuntimeException("boom");' 2>/dev/null)
+check "debug: error in body" '"error":"server_error"' "$DBG"
+check "debug: message + site" 'boom' "$DBG"
+# Without debug the handler is never installed: nothing reaches stdout (stderr
+# is the log, not the response).
+ND=$(php -r 'require "src/bootstrap.php"; throw new RuntimeException("secret-path");' 2>/dev/null)
+case "$ND" in *secret-path*) bad "debug off: no leak" "$ND";; *) ok "debug off: no leak";; esac
 
 # Cron: tick runs (1 sub left), immediate rerun dedupes.
 check "cron tick" '"subscriptions":1' "$(H GET 'http://127.0.0.1:8080/cron?action=tick&key=testkey123')"
