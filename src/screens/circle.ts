@@ -175,7 +175,7 @@ function makeInviteBlock(handle: string): HTMLElement {
 
   const hint = document.createElement('p');
   hint.className = 'text-xs text-ink/40 text-center';
-  hint.textContent = 'Share a link. They connect, you approve — and you both see each other’s photos.';
+  hint.textContent = 'Not a group — just one friend. They connect, you approve, and you both see each other’s photos.';
   wrap.appendChild(hint);
 
   return wrap;
