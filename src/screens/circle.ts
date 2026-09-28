@@ -172,11 +172,30 @@ function makeGroupsSection(auth: AuthState, groups: Group[], reload: () => void)
   section.appendChild(makeSectionHeading(`Groups · ${groups.length}`));
 
   for (const g of groups) {
-    const { row, actions } = makeAccountRow({
-      displayName: g.name,
-      handle: g.id,
-      avatarUrl: GROUP_AVATAR,
-    });
+    // Deliberately NOT makeAccountRow: its "@handle" subtitle would make the
+    // slug look like a fediverse account (@crew might be a real one). The group
+    // is a meenow-only concept; the slug only matters inside the invite link.
+    const row = document.createElement('div');
+    row.className = 'flex items-center gap-3 px-4 py-3';
+    const avatar = document.createElement('img');
+    avatar.src = GROUP_AVATAR;
+    avatar.className = 'w-9 h-9 rounded-full object-cover bg-gold-light shrink-0';
+    avatar.alt = '';
+    row.appendChild(avatar);
+    const info = document.createElement('div');
+    info.className = 'flex-1 min-w-0';
+    const nameEl = document.createElement('p');
+    nameEl.className = 'text-sm font-medium text-ink truncate';
+    nameEl.textContent = g.name;
+    info.appendChild(nameEl);
+    const metaEl = document.createElement('p');
+    metaEl.className = 'text-xs text-ink/40 truncate';
+    metaEl.textContent = 'meenow group';
+    info.appendChild(metaEl);
+    row.appendChild(info);
+    const actions = document.createElement('div');
+    actions.className = 'shrink-0 flex items-center gap-2';
+    row.appendChild(actions);
 
     const shareBtn = document.createElement('button');
     shareBtn.className = 'text-xs rounded-full px-3 py-1.5 border border-gold/40 text-gold';
