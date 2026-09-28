@@ -14,7 +14,8 @@ import { isLockedApplied, setLockedApplied } from '../state';
 import { profileUrl } from '../config';
 import { makeAccountRow } from '../components/accountRow';
 import { makeConnectButton } from '../components/connectButton';
-import { fetchMyGroups, fetchGroup, leaveGroup, createInvite, type Group } from '../api/groups';
+import { makeGroupInviteButton, makeGroupLeaveButton } from '../components/groupActions';
+import { fetchMyGroups, fetchGroup, type Group } from '../api/groups';
 import { normAcct } from '../api/groupAuto';
 
 export function renderCircle(
@@ -227,44 +228,19 @@ function makeGroupsSection(
       row.tabIndex = 0;
       row.addEventListener('click', () => onOpenGroup(g.id));
       row.addEventListener('keydown', (e) => {
+        if (e.target !== row) return;
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenGroup(g.id); }
       });
     }
 
     const actions = document.createElement('div');
     actions.className = 'shrink-0 flex items-center gap-2';
+    // The pills must not also trigger the admin's tap-through to the roster.
+    actions.addEventListener('click', e => e.stopPropagation());
     row.appendChild(actions);
 
-    const shareBtn = document.createElement('button');
-    shareBtn.className = 'text-xs rounded-full px-3 py-1.5 border border-gold/40 text-gold';
-    shareBtn.textContent = 'Invite';
-    shareBtn.addEventListener('click', () => void shareGroup(auth, g.id, shareBtn));
-    actions.appendChild(shareBtn);
-
-    const leaveBtn = document.createElement('button');
-    leaveBtn.className = 'text-xs rounded-full px-3 py-1.5 border border-ink/10 text-ink/30';
-    leaveBtn.textContent = 'Leave';
-    let confirming = false;
-    leaveBtn.addEventListener('click', () => {
-      if (!confirming) {
-        confirming = true;
-        leaveBtn.textContent = 'Sure?';
-        leaveBtn.className = 'text-xs rounded-full px-3 py-1.5 border border-gold/40 text-gold';
-        window.setTimeout(() => {
-          if (!confirming || !leaveBtn.isConnected) return;
-          confirming = false;
-          leaveBtn.textContent = 'Leave';
-          leaveBtn.className = 'text-xs rounded-full px-3 py-1.5 border border-ink/10 text-ink/30';
-        }, 3000);
-        return;
-      }
-      leaveBtn.disabled = true;
-      void leaveGroup(auth, g.id).then(reload).catch(() => {
-        leaveBtn.disabled = false;
-        leaveBtn.textContent = 'Try again';
-      });
-    });
-    actions.appendChild(leaveBtn);
+    actions.appendChild(makeGroupInviteButton(auth, g.id));
+    actions.appendChild(makeGroupLeaveButton(auth, g.id, reload));
 
     section.appendChild(row);
   }
@@ -274,43 +250,6 @@ function makeGroupsSection(
 const GROUP_AVATAR = `data:image/svg+xml,${encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72"><rect width="72" height="72" rx="36" fill="#F3E8D0"/><circle cx="28" cy="30" r="9" fill="#B08947"/><circle cx="45" cy="33" r="7" fill="#B08947" opacity="0.7"/><path d="M14 56c2-10 10-14 14-14s12 4 14 14z" fill="#B08947"/><path d="M38 56c1-7 5-10 7-10s6 3 7 10z" fill="#B08947" opacity="0.7"/></svg>',
 )}`;
-
-// Mint a fresh invite and share it. The link carries a random token, never the
-// group slug, so sharing it grants access without publishing the group — and it
-// stops working on its own (a few hours, a handful of people). Minting per share
-// rather than reusing one permanent link is what makes "I sent that to the wrong
-// chat" a non-event.
-async function shareGroup(auth: AuthState, groupId: string, btn: HTMLButtonElement): Promise<void> {
-  const original = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '…';
-  let url: string;
-  try {
-    const invite = await createInvite(auth, groupId);
-    url = `${window.location.origin}/?join=${encodeURIComponent(invite.token)}`;
-  } catch {
-    btn.disabled = false;
-    btn.textContent = 'Try again';
-    window.setTimeout(() => { btn.textContent = original; }, 2000);
-    return;
-  }
-  btn.disabled = false;
-
-  if (navigator.share) {
-    try {
-      await navigator.share({ title: 'meenow', text: 'Join my meenow group', url });
-      btn.textContent = original;
-      return;
-    } catch { /* user cancelled or share failed — fall back to copy */ }
-  }
-  try {
-    await navigator.clipboard.writeText(url);
-    btn.textContent = 'Link copied';
-  } catch {
-    btn.textContent = 'Copy failed';
-  }
-  window.setTimeout(() => { btn.textContent = original; }, 2000);
-}
 
 async function shareInvite(handle: string, btn: HTMLButtonElement): Promise<void> {
   const url = `${window.location.origin}/?add=${encodeURIComponent(handle)}`;

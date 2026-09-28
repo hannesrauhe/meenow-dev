@@ -14,6 +14,7 @@ import {
   GroupApiError, type GroupBan, type GroupMember,
 } from '../api/groups';
 import { makeAccountRow } from '../components/accountRow';
+import { makeGroupInviteButton, makeGroupLeaveButton } from '../components/groupActions';
 import { profileUrl } from '../config';
 
 export function renderGroupMembers(
@@ -48,11 +49,11 @@ export function renderGroupMembers(
   content.className = 'flex-1';
   root.appendChild(content);
 
-  load(content, auth, groupId);
+  load(content, auth, groupId, onBack);
   return root;
 }
 
-async function load(container: HTMLElement, auth: AuthState, groupId: string): Promise<void> {
+async function load(container: HTMLElement, auth: AuthState, groupId: string, onBack: () => void): Promise<void> {
   container.innerHTML = `
     <div class="flex items-center justify-center py-20">
       <div class="w-8 h-8 spinner"></div>
@@ -68,7 +69,7 @@ async function load(container: HTMLElement, auth: AuthState, groupId: string): P
     const debug = err instanceof GroupApiError ? err.debug : undefined;
     renderMessage(container, gone
       ? 'This group no longer exists.'
-      : debug ?? 'Could not load the group.', () => load(container, auth, groupId));
+      : debug ?? 'Could not load the group.', () => load(container, auth, groupId, onBack));
     return;
   }
   if (!container.isConnected) return;
@@ -88,13 +89,20 @@ async function load(container: HTMLElement, auth: AuthState, groupId: string): P
     ? 'You run this group. Removing someone also disconnects them from everyone in it.'
     : 'Members of this group.';
   intro.appendChild(hint);
+
+  const actions = document.createElement('div');
+  actions.className = 'flex items-center gap-2 mt-3';
+  actions.appendChild(makeGroupInviteButton(auth, group.id));
+  actions.appendChild(makeGroupLeaveButton(auth, group.id, onBack));
+  intro.appendChild(actions);
+
   container.appendChild(intro);
 
   const list = document.createElement('div');
   list.className = 'border-t border-ink/10';
   for (const m of group.members) {
     list.appendChild(memberRow(auth, group.id, m, me, group.admin,
-      () => load(container, auth, groupId), (err) => showDebug(container, err)));
+      () => load(container, auth, groupId, onBack), (err) => showDebug(container, err)));
   }
   container.appendChild(list);
 
@@ -106,7 +114,7 @@ async function load(container: HTMLElement, auth: AuthState, groupId: string): P
     banList.className = 'border-t border-ink/10';
     for (const b of group.bans) {
       banList.appendChild(banRow(auth, group.id, b,
-        () => load(container, auth, groupId), (err) => showDebug(container, err)));
+        () => load(container, auth, groupId, onBack), (err) => showDebug(container, err)));
     }
     container.appendChild(banList);
   }
