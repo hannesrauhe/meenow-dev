@@ -568,18 +568,15 @@ function groups_events(PDO $pdo, mixed $accountRaw, mixed $sinceRaw): void
 // Identity verification
 // ---------------------------------------------------------------------------
 
-// Prove that the caller really is "<instance>:<accountId>". The instance must
-// be on the proxy allowlist and is compared EXACTLY (same posture as
-// proxy_instance()), so this can never be pointed at an arbitrary host; the
-// caller's own token is relayed and nothing is stored. Returns the
-// authoritative handle on success, false on a mismatch, null when
-// verification is disabled (the Docker suite runs on dummy tokens).
+// Prove the caller really is "<instance>:<accountId>", relaying their own Bearer
+// to verify_credentials. The instance is compared EXACTLY against the proxy
+// allowlist, so this can never point at an arbitrary host. Returns the
+// authoritative handle on success, false on a mismatch, null when disabled.
+// `false` can't appear in a PHP union type, hence string|bool|null.
 //
-// Why this is not optional in practice: membership is otherwise a
-// self-asserted string, and both auto-approve and the admin check act on what
-// is STORED. An unverified join is a row everyone follows and approves; an
-// unverified `actor` is anyone claiming to be the admin.
-function groups_verify_account(string $account, string $bearer, string $acct): bool|null
+// Not optional in practice: membership is self-asserted, and auto-approve and
+// the admin check act on the STORED string.
+function groups_verify_account(string $account, string $bearer, string $acct): string|bool|null
 {
     $cfg = meenow_config();
     if (!($cfg['verify_group_accounts'] ?? true)) return null;
@@ -587,7 +584,6 @@ function groups_verify_account(string $account, string $bearer, string $acct): b
 
     $sep = strrpos($account, ':');
     $instance = strtolower(substr($account, 0, (int) $sep));
-    $accountId = substr($account, $sep + 1);
 
     $allowed = array_map('strtolower', array_merge(
         [$cfg['home_instance'] ?? ''],
@@ -604,12 +600,17 @@ function groups_verify_account(string $account, string $bearer, string $acct): b
     $raw = @file_get_contents("https://{$instance}/api/v1/accounts/verify_credentials", false, $ctx);
     if ($raw === false) return false;
     $me = json_decode($raw, true);
-    if (!is_array($me) || !isset($me['id'])) return false;
+    if (!is_array($me)) return false;
+    return groups_verify_payload($me, $account, $acct);
+}
 
-    // The id is the claim that matters. The handle travels too so a stored acct
-    // cannot drift from its account — and the returned value is what gets
-    // written, which is how an account rename self-heals.
-    if ((string) $me['id'] !== $accountId) return false;
+// Pure half of the check, so the success path is testable without an instance.
+// The id is the claim that matters; the handle travels too so a stored acct
+// cannot drift, and the returned handle is what gets written (rename self-heal).
+function groups_verify_payload(array $me, string $account, string $acct): string|bool
+{
+    $sep = strrpos($account, ':');
+    if ($sep === false || (string) ($me['id'] ?? '') !== substr($account, $sep + 1)) return false;
     $trueAcct = groups_acct($me['acct'] ?? '', $account);
     return $trueAcct === $acct ? $trueAcct : false;
 }
