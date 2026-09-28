@@ -12,6 +12,7 @@ import {
 } from '../api/social';
 import { isLockedApplied, setLockedApplied } from '../state';
 import { makeAccountRow } from '../components/accountRow';
+import { makeConnectButton } from '../components/connectButton';
 
 export function renderCircle(
   auth: AuthState,
@@ -75,10 +76,13 @@ async function loadCircle(
 
   let requests: Connection[];
   let following: Connection[];
+  let followers: Connection[];
   try {
-    [requests, following] = await Promise.all([
+    [requests, following, followers] = await Promise.all([
       fetchFollowRequests(auth),
       fetchConnections(auth, account.id, 'following'),
+      // Fail-soft: an unreadable follower list must never hide the inbox.
+      fetchConnections(auth, account.id, 'followers').catch(() => []),
     ]);
   } catch {
     showError(container, () => loadCircle(container, auth, onOpenPeer));
@@ -86,7 +90,16 @@ async function loadCircle(
   }
   if (!container.isConnected) return;
 
-  const rels = await fetchRelationships(auth, following.map(f => f.id));
+  // Followers we don't already follow. These can exist without ever appearing
+  // in the inbox: a back-follow that failed after we accepted, follows from
+  // before the account was locked, or remote auto-accepts.
+  const followingIds = new Set(following.map(c => c.id));
+  const followsYou = followers.filter(c => !followingIds.has(c.id));
+
+  const rels = await fetchRelationships(auth, [
+    ...following.map(c => c.id),
+    ...followsYou.map(c => c.id),
+  ]);
   if (!container.isConnected) return;
 
   const inviteHandle = account.acct.includes('@') ? account.acct : `${account.acct}@${auth.instance}`;
@@ -96,7 +109,10 @@ async function loadCircle(
   if (requests.length > 0) {
     container.appendChild(makeRequestsSection(auth, requests, () => loadCircle(container, auth, onOpenPeer)));
   }
-  container.appendChild(makeCircleSection(following, rels, onOpenPeer));
+  if (followsYou.length > 0) {
+    container.appendChild(makeFollowsYouSection(auth, followsYou, rels, onOpenPeer, () => loadCircle(container, auth, onOpenPeer)));
+  }
+  container.appendChild(makeCircleSection(following, followsYou.length, rels, onOpenPeer));
   container.appendChild(makeLockRow(auth, lockedNow));
 }
 
@@ -199,9 +215,10 @@ function makeRequestsSection(auth: AuthState, requests: Connection[], reload: ()
       try {
         const rel = await acceptAndBackFollow(auth, req.id);
         invalidatePendingRequestCache();
-        // Mutual immediately, unless the requester is also locked and our
-        // back-follow is now queued on their side.
-        resolved(actions, rel.following && rel.followedBy ? 'Connected' : 'Accepted');
+        // Mutual immediately, unless the requester is also locked or the
+        // back-follow failed — either way they are accepted, and show up under
+        // "Follows you" with a one-tap retry once the section reloads.
+        resolved(actions, rel?.following && rel.followedBy ? 'Connected' : 'Accepted');
       } catch {
         // A failed request is otherwise indistinguishable from a tap that did
         // nothing, so show it was tried and failed rather than reverting silently.
@@ -230,8 +247,42 @@ function makeRequestsSection(auth: AuthState, requests: Connection[], reload: ()
   return section;
 }
 
+function makeFollowsYouSection(
+  auth: AuthState,
+  followsYou: Connection[],
+  rels: Map<string, Relationship>,
+  onOpenPeer: (peer: Connection) => void,
+  reload: () => void,
+): HTMLElement {
+  const section = document.createElement('div');
+  section.className = 'border-b border-ink/8';
+  section.appendChild(makeSectionHeading(`Follows you · ${followsYou.length}`));
+
+  // Connecting moves the row into the circle list, so the screen is rebuilt —
+  // but only once, however many rows the user connects in one visit.
+  let reloadScheduled = false;
+
+  for (const c of followsYou) {
+    const { row, actions } = makeAccountRow({ displayName: c.displayName, handle: c.acct, avatarUrl: c.avatarUrl });
+    row.classList.add('cursor-pointer');
+    row.addEventListener('click', () => onOpenPeer(c));
+    // The pill's own tap must not also drill into the peer screen via the row.
+    actions.addEventListener('click', e => e.stopPropagation());
+    actions.appendChild(makeConnectButton(auth, c.id, rels.get(c.id), rel => {
+      if (rel.following && rel.followedBy && !reloadScheduled) {
+        reloadScheduled = true;
+        window.setTimeout(reload, 900);
+      }
+    }));
+    section.appendChild(row);
+  }
+
+  return section;
+}
+
 function makeCircleSection(
   following: Connection[],
+  followsYouCount: number,
   rels: Map<string, Relationship>,
   onOpenPeer: (peer: Connection) => void,
 ): HTMLElement {
@@ -241,7 +292,7 @@ function makeCircleSection(
   const mutuals = following.filter(c => rels.get(c.id)?.followedBy);
   const oneWay = following.filter(c => !rels.get(c.id)?.followedBy);
 
-  if (following.length === 0) {
+  if (following.length === 0 && followsYouCount === 0) {
     section.innerHTML = `
       <div class="flex flex-col items-center py-16 gap-4 text-ink/40 text-center px-6">
         <div class="w-36 h-24">${SLEEPING_CAT}</div>

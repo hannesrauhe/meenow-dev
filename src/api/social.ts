@@ -174,15 +174,18 @@ export async function fetchFollowRequests(auth: AuthState): Promise<Connection[]
   return (await res.json() as ApiAccount[]).map(toConnection);
 }
 
-// :id is the requester's account id. The resulting relationship comes from the
-// back-follow call in acceptAndBackFollow, not from parsing this response body —
-// Pixelfed is inconsistent about what (if anything) this endpoint returns.
-export async function authorizeFollowRequest(auth: AuthState, accountId: string): Promise<void> {
+// :id is the requester's account id. Pixelfed echoes the relationship with
+// followed_by forced true; Mastodon returns an empty body. A 2xx means the
+// request was accepted either way, so an unparseable body synthesises the
+// relationship rather than costing a lookup or losing the accept.
+export async function authorizeFollowRequest(auth: AuthState, accountId: string): Promise<Relationship> {
   const res = await fetch(`${apiBase(auth.instance)}/api/v1/follow_requests/${accountId}/authorize`, {
     method: 'POST',
     headers: authHeaders(auth),
   });
   if (!res.ok) throw new Error(`Authorize failed (${res.status})`);
+  const echoed = (await res.json().catch(() => ({}))) as Partial<ApiRelationship>;
+  return toRelationship({ ...echoed, id: accountId, followed_by: true });
 }
 
 export async function rejectFollowRequest(auth: AuthState, accountId: string): Promise<void> {
@@ -260,11 +263,17 @@ export function connectTo(auth: AuthState, accountId: string): Promise<Relations
 
 // Accepting an incoming request: authorize them (they can see your posts), then
 // auto-follow back (you can see theirs, or it queues if they're also locked).
-// If the back-follow fails, the authorize already succeeded — callers surface a
-// non-fatal state rather than rolling back.
-export async function acceptAndBackFollow(auth: AuthState, accountId: string): Promise<Relationship> {
+// The order matters: Pixelfed's follow endpoint only ever creates an *outgoing*
+// request, so it cannot resolve the incoming one itself. A failed back-follow
+// returns null instead of rejecting — the accept already happened server-side
+// and the caller must not present the tap as undone.
+export async function acceptAndBackFollow(auth: AuthState, accountId: string): Promise<Relationship | null> {
   await authorizeFollowRequest(auth, accountId);
-  return follow(auth, accountId);
+  try {
+    return await follow(auth, accountId);
+  } catch {
+    return null;
+  }
 }
 
 // --- Pending follow-request count (drives the feed-header badge) ---
