@@ -203,3 +203,13 @@ export async function resubscribeIfNeeded(): Promise<void> {
   if (!vapidKey) return;
   if (await shouldResubscribe(vapidKey)) await resubscribeAsPwa();
 }
+
+// Tell the SW to dismiss a pending daily reminder the moment the user posts,
+// instead of leaving it in the shade until the next tick reaches the digest
+// branch. Fire-and-forget: no SW (or no active SW) just means nothing to close.
+export function closeDailyNotification(): void {
+  void navigator.serviceWorker
+    .getRegistration()
+    .then(reg => reg?.active?.postMessage({ type: 'close-daily' }))
+    .catch(() => {});
+}

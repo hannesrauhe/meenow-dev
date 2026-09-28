@@ -63,8 +63,12 @@ Per instance (repeat for dev). SSH into the host, work in the instance dir.
 7. **Smoke**: `php scripts/smoke.php` — must print "All checks passed."
 8. **Point the domain's docroot at `<instance>/public`** (hosting panel or vhost
    config; TLS as usual).
-9. **Scheduled URL** (hosting cron / uptime pinger): one GET, every 30 min:
+9. **Scheduled URL** (hosting cron / uptime pinger): one GET at an
+   operator-chosen interval, e.g. every 30 min:
    `https://meenow.de/cron?action=tick&key=KEY`.
+   Firing more often is harmless — `cron_slots` dedupes per 30-minute bucket, so
+   the effective send interval is `max(host interval, 30 min)` and a denser cron
+   does not multiply pushes. (30 min is the suggested minimum.)
    (xkcd needs no cron — `/xkcd.json` refreshes its cache on request.)
 
 ## Deploying an update
@@ -147,4 +151,7 @@ instead). Unit-tested in `scripts/test-proxy-body.php`.
 
 Many shared hosts only allow scheduled HTTP GETs, so the tick is a key-gated URL
 (`/cron?action=tick&key=…`, timing-safe compare). MySQL slot dedupe makes
-double-fires harmless; `?force=1` bypasses gating for manual tests.
+double-fires harmless; `?force=1` bypasses gating for manual tests. The 1800 s
+slot bucket is also what bounds the effective tick cadence: whatever interval the
+host's scheduled URL fires at, at most one run per 30-minute bucket reaches the
+push layer.

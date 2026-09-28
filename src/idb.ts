@@ -9,6 +9,11 @@ export const IDB_KEYS = {
   lastSeenNotifId: 'last-seen-notif-id',
   digestShownTriggerMs: 'digest-shown-trigger-ms',
   silentPushCount: 'silent-push-count',
+  // Daily-reminder ladder: which trigger period it belongs to and how many
+  // reminders of that period have been shown. Keyed by trigger so it self-resets
+  // every period with no cleanup, like digestShownTriggerMs.
+  dailyShownTriggerMs: 'daily-shown-trigger-ms',
+  dailyShownCount: 'daily-shown-count',
 } as const;
 
 export interface StoredAuth {

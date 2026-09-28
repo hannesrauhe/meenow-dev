@@ -33,10 +33,25 @@ clientsClaim();
 
 self.addEventListener('message', (event: ExtendableMessageEvent) => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
+  // Posted from the app the moment the user posts, so the pending reminder
+  // disappears instead of waiting for the next tick's digest branch.
+  if (event.data?.type === 'close-daily') event.waitUntil(closeDaily());
 });
 
 const ICON = '/icon-192.png';
 const BADGE = '/badge-96.png';
+const DAILY_TAG = 'meenow-daily';
+
+// Escalating copy for the daily reminder: rung 0 is a period's first call, the
+// last rung is the server-flagged evening "last call". The number of rungs IS
+// the cap on visible reminders per period (see MAX_DAILY_REMINDERS), so editing
+// this array moves both — keep them in sync by editing only here.
+const DAILY_COPY = [
+  'Time for your daily meenow!',
+  'Your meenow is still waiting',
+  'Last call \u2014 today\u2019s meenow',
+];
+const MAX_DAILY_REMINDERS = DAILY_COPY.length;
 
 // App-icon badge alongside the daily reminder (installed PWAs on Android and
 // iOS 16.4+; cleared by the app on open/post). Fire-and-forget where unsupported.
@@ -45,15 +60,66 @@ function setAppBadge(): void {
   void nav.setAppBadge?.(1).catch(() => {});
 }
 
-function showDaily(): Promise<void> {
+// Show a daily reminder, picking the next copy rung for this period. Only the
+// first reminder of a period is audible: a same-tag replace re-alerts on Android
+// unless silenced, and `renotify` is deliberately absent — re-alerting is the
+// behaviour being removed here, not something to re-enable.
+async function showDaily(triggerMs: number, lastCall: boolean): Promise<void> {
+  const shown = (await idbGet<number>(IDB_KEYS.dailyShownTriggerMs)) ?? 0;
+  const count = shown < triggerMs ? 0 : (await idbGet<number>(IDB_KEYS.dailyShownCount)) ?? 0;
+  const rung = lastCall ? DAILY_COPY.length - 1 : Math.min(count, DAILY_COPY.length - 1);
   setAppBadge();
-  return self.registration.showNotification('meenow', {
-    body: 'Time for your daily meenow!',
+  await self.registration.showNotification('meenow', {
+    body: DAILY_COPY[rung],
     icon: ICON,
     badge: BADGE,
-    tag: 'meenow-daily',
+    tag: DAILY_TAG,
+    silent: count > 0,
     data: { action: 'capture' },
-  }).then(resetSilentCount);
+  });
+  await idbSet(IDB_KEYS.dailyShownTriggerMs, triggerMs);
+  await idbSet(IDB_KEYS.dailyShownCount, count + 1);
+  await resetSilentCount();
+}
+
+// True while a daily reminder is still on screen. Fails visible (true) on error:
+// an unreadable list must not buy us a silent push we cannot justify, matching
+// trySilent's "cannot count — fail visible".
+function dailyStillVisible(): Promise<boolean> {
+  return self.registration
+    .getNotifications({ tag: DAILY_TAG })
+    .then(list => list.length > 0)
+    .catch(() => true);
+}
+
+function closeDaily(): Promise<void> {
+  return self.registration
+    .getNotifications({ tag: DAILY_TAG })
+    .then(list => list.forEach(n => n.close()))
+    .catch(() => {});
+}
+
+// A period gets at most MAX_DAILY_REMINDERS visible reminders (first call, one
+// reminder, last call) and never an identical duplicate. The cap counts *shown
+// reminders*, never ticks: how many ticks fall in a period is an operator
+// setting (the host cron interval, deduped only by the backend's slot bucket),
+// so tick-based logic would break the moment that changes.
+async function showDailyOrSkip(triggerMs: number, late: boolean): Promise<void> {
+  const shown = (await idbGet<number>(IDB_KEYS.dailyShownTriggerMs)) ?? 0;
+  if (shown < triggerMs) return showDaily(triggerMs, late);
+
+  // The evening tick is a period's final rung by construction (timezone-correct
+  // server-side), so it passes even once the cap is reached.
+  if (late) return showDaily(triggerMs, true);
+
+  const count = (await idbGet<number>(IDB_KEYS.dailyShownCount)) ?? 0;
+  // At the cap, or still on screen: stay silent while the iOS budget allows, and
+  // otherwise re-show the last rung — a same-tag replace still counts as
+  // user-visible for WebKit's strike counter, which is the point.
+  if (count >= MAX_DAILY_REMINDERS || (await dailyStillVisible())) {
+    return (await trySilent()) ? undefined : showDaily(triggerMs, false);
+  }
+  return showDaily(triggerMs, false);
 }
 
 function plural(n: number, one: string, many: string): string {
@@ -77,6 +143,8 @@ function showFallback(): Promise<void> {
 // posted. Ticks with nothing to report stay silent within the counted budget;
 // once it is exhausted the minimal fallback shows (iOS three-strikes revocation).
 async function showPostPostedDigest(triggerMs: number, late: boolean): Promise<void> {
+  // The user posted: a reminder still sitting in the shade is stale now.
+  await closeDaily();
   const auth = await idbGet<StoredAuth>(IDB_KEYS.auth);
   if (!auth) return showFallbackOrSilent();
 
@@ -161,7 +229,7 @@ async function handleTick(late: boolean): Promise<void> {
   const notPosted = await idbGet<number>(IDB_KEYS.postedTriggerMs)
     .then(posted => (posted ?? 0) < triggerMs)
     .catch(() => true);
-  await (notPosted ? showDaily() : showPostPostedDigest(triggerMs, late));
+  await (notPosted ? showDailyOrSkip(triggerMs, late) : showPostPostedDigest(triggerMs, late));
 }
 
 self.addEventListener('push', event => {
@@ -173,7 +241,8 @@ self.addEventListener('push', event => {
   } catch { /* malformed payload */ }
 
   if (data.force) {
-    event.waitUntil(showDaily().catch(err => console.error('[sw] push handler failed', err)));
+    const forceTriggerMs = getLastTriggerTime().getTime();
+    event.waitUntil(showDaily(forceTriggerMs, false).catch(err => console.error('[sw] push handler failed', err)));
     return;
   }
 

@@ -20,7 +20,7 @@ import { renderInstallNudge, removeInstallNudge } from './components/installNudg
 import { renderNotificationNudge, removeNotificationNudge } from './components/notificationNudge';
 import { registerSW } from 'virtual:pwa-register';
 import { idbSet, IDB_KEYS } from './idb';
-import { resubscribeIfNeeded, syncSubscriptionTz, clearAppBadge } from './notifications';
+import { resubscribeIfNeeded, syncSubscriptionTz, clearAppBadge, closeDailyNotification } from './notifications';
 
 const app = document.getElementById('app')!;
 type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'grid' | 'circle' | 'peer' | 'connect';
@@ -167,6 +167,7 @@ const updateSW = registerSW({
 function onPosted(): void {
   if (periodPostCount === 0) {
     void idbSet(IDB_KEYS.postedTriggerMs, getLastTriggerTime().getTime());
+    closeDailyNotification();
   }
   periodPostCount = Math.min(periodPostCount + 1, MAX_POSTS_PER_TRIGGER);
   clearAppBadge();
@@ -180,6 +181,7 @@ function onPostCountRefresh(count: number): void {
   if (clamped === periodPostCount) return;
   if (periodPostCount === 0 && clamped > 0) {
     void idbSet(IDB_KEYS.postedTriggerMs, getLastTriggerTime().getTime());
+    closeDailyNotification();
   }
   periodPostCount = clamped;
   if (activeScreen === 'feed') mount('feed');
@@ -481,6 +483,9 @@ async function init(): Promise<void> {
       periodPostCount = Math.min(await fetchTodayPostCount(auth), MAX_POSTS_PER_TRIGGER);
       if (periodPostCount > 0) {
         void idbSet(IDB_KEYS.postedTriggerMs, getLastTriggerTime().getTime());
+        // The period is already answered (possibly from another device), so a
+        // reminder still in the shade is stale.
+        closeDailyNotification();
       }
     } catch {
       periodPostCount = 0;

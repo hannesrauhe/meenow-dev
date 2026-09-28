@@ -161,8 +161,10 @@ export function clearAuth(): void {
   localStorage.removeItem(`${PREFIX}verifier`);
   clearPendingAdd();
   localStorage.removeItem('meenow:pwa-subbed');
-  // Drop the SW's mirrored auth and engagement-digest state.
+  // Drop the SW's mirrored auth, engagement-digest and daily-reminder state.
   void idbDelete(IDB_KEYS.auth);
   void idbDelete(IDB_KEYS.lastSeenNotifId);
   void idbDelete(IDB_KEYS.digestShownTriggerMs);
+  void idbDelete(IDB_KEYS.dailyShownTriggerMs);
+  void idbDelete(IDB_KEYS.dailyShownCount);
 }
