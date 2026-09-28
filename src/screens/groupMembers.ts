@@ -92,7 +92,8 @@ async function load(container: HTMLElement, auth: AuthState, groupId: string): P
   const list = document.createElement('div');
   list.className = 'border-t border-ink/10';
   for (const m of group.members) {
-    list.appendChild(memberRow(auth, group.id, m, me, group.admin, () => load(container, auth, groupId)));
+    list.appendChild(memberRow(auth, group.id, m, me, group.admin,
+      () => load(container, auth, groupId), (err) => showDebug(container, err)));
   }
   container.appendChild(list);
 
@@ -103,7 +104,8 @@ async function load(container: HTMLElement, auth: AuthState, groupId: string): P
     const banList = document.createElement('div');
     banList.className = 'border-t border-ink/10';
     for (const b of group.bans) {
-      banList.appendChild(banRow(auth, group.id, b, () => load(container, auth, groupId)));
+      banList.appendChild(banRow(auth, group.id, b,
+        () => load(container, auth, groupId), (err) => showDebug(container, err)));
     }
     container.appendChild(banList);
   }
@@ -116,6 +118,7 @@ function memberRow(
   me: string,
   isAdmin: boolean,
   reload: () => void,
+  onError: (err: unknown) => void,
 ): HTMLElement {
   const isSelf = m.account === me;
   const { row, actions } = makeAccountRow({
@@ -163,7 +166,7 @@ function memberRow(
     void removeMember(auth, groupId, m.account).then(reload).catch((err) => {
       btn.disabled = false;
       btn.textContent = 'Try again';
-      showDebug(container, err);
+      onError(err);
     });
   });
 
@@ -171,7 +174,13 @@ function memberRow(
   return row;
 }
 
-function banRow(auth: AuthState, groupId: string, b: GroupBan, reload: () => void): HTMLElement {
+function banRow(
+  auth: AuthState,
+  groupId: string,
+  b: GroupBan,
+  reload: () => void,
+  onError: (err: unknown) => void,
+): HTMLElement {
   const { row, actions } = makeAccountRow({
     displayName: b.acct.split('@')[0] || b.acct,
     handle: b.acct,
@@ -189,7 +198,7 @@ function banRow(auth: AuthState, groupId: string, b: GroupBan, reload: () => voi
     void unbanMember(auth, groupId, b.account).then(reload).catch((err) => {
       btn.disabled = false;
       btn.textContent = 'Try again';
-      showDebug(container, err);
+      onError(err);
     });
   });
   actions.appendChild(btn);
