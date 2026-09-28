@@ -246,15 +246,16 @@ interface HomeCache { statuses: MastodonStatus[]; newestId: string; fetchedAt: n
 let _homeCache: HomeCache | null = null;
 let _homePending: Promise<MastodonStatus[]> | null = null;
 
-// `force` skips the TTL short-circuit (explicit user refresh); the fetch itself
-// stays incremental via since_id and concurrent callers still share _homePending.
+// `force` skips the TTL short-circuit AND fetches the full timeline (not just
+// since_id), so an explicit refresh also re-sees cached statuses and can pick up
+// changed account data. Concurrent callers still share _homePending.
 function fetchHomeTimeline(auth: AuthState, force = false): Promise<MastodonStatus[]> {
   if (_homePending) return _homePending;
   if (!force && _homeCache && Date.now() - _homeCache.fetchedAt < HOME_CACHE_TTL_MS) {
     return Promise.resolve(_homeCache.statuses);
   }
 
-  const url = _homeCache?.newestId
+  const url = _homeCache?.newestId && !force
     ? `${apiBase(auth.instance)}/api/v1/timelines/home?limit=${HOME_TIMELINE_LIMIT}&since_id=${_homeCache.newestId}`
     : `${apiBase(auth.instance)}/api/v1/timelines/home?limit=${HOME_TIMELINE_LIMIT}`;
 
@@ -277,6 +278,13 @@ function fetchHomeTimeline(auth: AuthState, force = false): Promise<MastodonStat
         if (fresh.length > 0) {
           _homeCache.statuses = [...fresh, ..._homeCache.statuses].slice(0, HOME_CACHE_MAX);
           _homeCache.newestId = fresh[0].id;
+        }
+        // since_id only returns new statuses, so a cached one keeps its old
+        // account object — refresh it to pick up a changed avatar URL.
+        const byId = new Map(incoming.map(s => [s.id, s]));
+        for (const s of _homeCache.statuses) {
+          const updated = byId.get(s.id);
+          if (updated) s.account = updated.account;
         }
         _homeCache.fetchedAt = now;
       } else {

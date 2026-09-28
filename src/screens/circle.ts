@@ -11,14 +11,15 @@ import {
   type Connection, type Relationship,
 } from '../api/social';
 import { isLockedApplied, setLockedApplied } from '../state';
+import { profileUrl } from '../config';
 import { makeAccountRow } from '../components/accountRow';
 import { makeConnectButton } from '../components/connectButton';
-import { fetchMyGroups, leaveGroup, createInvite, type Group } from '../api/groups';
+import { fetchMyGroups, fetchGroup, leaveGroup, createInvite, type Group } from '../api/groups';
+import { normAcct } from '../api/groupAuto';
 
 export function renderCircle(
   auth: AuthState,
   onBack: () => void,
-  onOpenPeer: (peer: Connection) => void,
   onOpenGroup: (groupId: string) => void,
 ): HTMLElement {
   const root = document.createElement('div');
@@ -48,14 +49,13 @@ export function renderCircle(
   content.className = 'flex-1';
   root.appendChild(content);
 
-  loadCircle(content, auth, onOpenPeer, onOpenGroup);
+  loadCircle(content, auth, onOpenGroup);
   return root;
 }
 
 async function loadCircle(
   container: HTMLElement,
   auth: AuthState,
-  onOpenPeer: (peer: Connection) => void,
   onOpenGroup: (groupId: string) => void,
 ): Promise<void> {
   container.innerHTML = `
@@ -68,7 +68,7 @@ async function loadCircle(
   try {
     account = await fetchMyAccount(auth);
   } catch {
-    showError(container, () => loadCircle(container, auth, onOpenPeer, onOpenGroup));
+    showError(container, () => loadCircle(container, auth, onOpenGroup));
     return;
   }
   if (!container.isConnected) return;
@@ -91,10 +91,25 @@ async function loadCircle(
       fetchMyGroups(auth),
     ]);
   } catch {
-    showError(container, () => loadCircle(container, auth, onOpenPeer, onOpenGroup));
+    showError(container, () => loadCircle(container, auth, onOpenGroup));
     return;
   }
   if (!container.isConnected) return;
+
+  // Group members are managed through their group roster, so hide them from the
+  // follower lists. Roster fetches are fail-soft: an unreadable one just leaves
+  // those members visible. Match on the fediverse handle — the only key valid
+  // across instances — qualifying a bare same-instance acct with our instance.
+  const groupAccts = new Set<string>();
+  for (const members of await Promise.all(
+    groups.map(g => fetchGroup(auth, g.id).then(r => r.members).catch(() => [])),
+  )) {
+    for (const m of members) groupAccts.add(normAcct(m.acct));
+  }
+  const inGroup = (acct: string): boolean =>
+    groupAccts.has(normAcct(acct.includes('@') ? acct : `${acct}@${auth.instance}`));
+  following = following.filter(c => !inGroup(c.acct));
+  followers = followers.filter(c => !inGroup(c.acct));
 
   // Followers we don't already follow. These can exist without ever appearing
   // in the inbox: a back-follow that failed after we accepted, follows from
@@ -111,18 +126,18 @@ async function loadCircle(
   const inviteHandle = account.acct.includes('@') ? account.acct : `${account.acct}@${auth.instance}`;
 
   container.innerHTML = '';
-  container.appendChild(makeInviteBlock(inviteHandle));
   if (groups.length > 0) {
     container.appendChild(makeGroupsSection(auth, groups,
-      () => loadCircle(container, auth, onOpenPeer, onOpenGroup), onOpenGroup));
+      () => loadCircle(container, auth, onOpenGroup), onOpenGroup));
   }
+  container.appendChild(makeInviteBlock(inviteHandle));
   if (requests.length > 0) {
-    container.appendChild(makeRequestsSection(auth, requests, () => loadCircle(container, auth, onOpenPeer, onOpenGroup)));
+    container.appendChild(makeRequestsSection(auth, requests, () => loadCircle(container, auth, onOpenGroup)));
   }
   if (followsYou.length > 0) {
-    container.appendChild(makeFollowsYouSection(auth, followsYou, rels, onOpenPeer, () => loadCircle(container, auth, onOpenPeer, onOpenGroup)));
+    container.appendChild(makeFollowsYouSection(auth, followsYou, rels, () => loadCircle(container, auth, onOpenGroup)));
   }
-  container.appendChild(makeCircleSection(auth, following, followsYou.length, rels, onOpenPeer, () => loadCircle(container, auth, onOpenPeer, onOpenGroup)));
+  container.appendChild(makeCircleSection(auth, following, followsYou.length, rels, groups.length > 0, () => loadCircle(container, auth, onOpenGroup)));
   container.appendChild(makeLockRow(auth, lockedNow));
 }
 
@@ -160,7 +175,7 @@ function makeInviteBlock(handle: string): HTMLElement {
 
   const hint = document.createElement('p');
   hint.className = 'text-xs text-ink/40 text-center';
-  hint.textContent = 'Share a link. They connect, you approve — and you both see each other’s photos.';
+  hint.textContent = 'Not a group — just one friend. They connect, you approve, and you both see each other’s photos.';
   wrap.appendChild(hint);
 
   return wrap;
@@ -341,7 +356,7 @@ function makeRequestsSection(auth: AuthState, requests: Connection[], reload: ()
   };
 
   for (const req of requests) {
-    const { row, actions } = makeAccountRow({ displayName: req.displayName, handle: req.acct, avatarUrl: req.avatarUrl });
+    const { row, actions } = makeAccountRow({ displayName: req.displayName, handle: req.acct, avatarUrl: req.avatarUrl, profileUrl: profileUrl(auth.instance, req.acct) });
 
     const accept = document.createElement('button');
     accept.className = 'text-xs rounded-full px-3 py-1.5 bg-ink text-cream font-medium';
@@ -392,7 +407,6 @@ function makeFollowsYouSection(
   auth: AuthState,
   followsYou: Connection[],
   rels: Map<string, Relationship>,
-  onOpenPeer: (peer: Connection) => void,
   reload: () => void,
 ): HTMLElement {
   const section = document.createElement('div');
@@ -404,11 +418,7 @@ function makeFollowsYouSection(
   let reloadScheduled = false;
 
   for (const c of followsYou) {
-    const { row, actions } = makeAccountRow({ displayName: c.displayName, handle: c.acct, avatarUrl: c.avatarUrl });
-    row.classList.add('cursor-pointer');
-    row.addEventListener('click', () => onOpenPeer(c));
-    // The pill's own tap must not also drill into the peer screen via the row.
-    actions.addEventListener('click', e => e.stopPropagation());
+    const { row, actions } = makeAccountRow({ displayName: c.displayName, handle: c.acct, avatarUrl: c.avatarUrl, profileUrl: profileUrl(auth.instance, c.acct) });
 
     // These people follow you, so they see your daily photos until removed —
     // the only remedy for a follower you never accepted (pre-lock follows,
@@ -458,7 +468,7 @@ function makeCircleSection(
   following: Connection[],
   followsYouCount: number,
   rels: Map<string, Relationship>,
-  onOpenPeer: (peer: Connection) => void,
+  groupManaged: boolean,
   reload: () => void,
 ): HTMLElement {
   const section = document.createElement('div');
@@ -471,18 +481,20 @@ function makeCircleSection(
     section.innerHTML = `
       <div class="flex flex-col items-center py-16 gap-4 text-ink/40 text-center px-6">
         <div class="w-36 h-24">${SLEEPING_CAT}</div>
-        <p class="text-sm">Your circle is empty — invite a friend to get started.</p>
+        <p class="text-sm">${groupManaged
+          ? 'Everyone you follow is in one of your groups.'
+          : 'No one-to-one connections yet — invite a friend to get started.'}</p>
       </div>
     `;
     return section;
   }
 
-  section.appendChild(makeSectionHeading(`Your circle · ${mutuals.length}`));
-  for (const c of mutuals) section.appendChild(makePeerRow(auth, c, rels.get(c.id), onOpenPeer, reload));
+  section.appendChild(makeSectionHeading(`One-to-one · ${mutuals.length}`));
+  for (const c of mutuals) section.appendChild(makePeerRow(auth, c, rels.get(c.id), reload));
 
   if (oneWay.length > 0) {
     section.appendChild(makeSectionHeading('Waiting for them'));
-    for (const c of oneWay) section.appendChild(makePeerRow(auth, c, rels.get(c.id), onOpenPeer, reload));
+    for (const c of oneWay) section.appendChild(makePeerRow(auth, c, rels.get(c.id), reload));
   }
 
   return section;
@@ -492,18 +504,13 @@ function makePeerRow(
   auth: AuthState,
   c: Connection,
   rel: Relationship | undefined,
-  onOpenPeer: (peer: Connection) => void,
   reload: () => void,
 ): HTMLElement {
-  const { row, actions } = makeAccountRow({ displayName: c.displayName, handle: c.acct, avatarUrl: c.avatarUrl });
-  row.classList.add('cursor-pointer');
-  row.addEventListener('click', () => onOpenPeer(c));
-  // The pill's own tap must not also drill into the peer screen via the row.
-  actions.addEventListener('click', e => e.stopPropagation());
+  const { row, actions } = makeAccountRow({ displayName: c.displayName, handle: c.acct, avatarUrl: c.avatarUrl, profileUrl: profileUrl(auth.instance, c.acct) });
 
-  // The pill is also the disconnect affordance (two-tap), which is the only way
-  // to leave a connection — the row itself only drills in. Any state change
-  // moves the row between groups (or out of the list), so rebuild once.
+  // The pill is also the disconnect affordance (two-tap), the only way to leave
+  // a connection. Any state change moves the row between groups (or out of the
+  // list), so rebuild once.
   let reloadScheduled = false;
   actions.appendChild(makeConnectButton(auth, c.id, rel, () => {
     if (reloadScheduled) return;

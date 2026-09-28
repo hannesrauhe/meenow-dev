@@ -4,13 +4,14 @@ import { clearAuth, getAuthState, type AuthState } from '../api/auth';
 import { disableNotifications } from '../notifications';
 import { MAX_POSTS_PER_TRIGGER } from '../state';
 import { fetchMeenowFeed, classifyFeedError, getLastFeedUrl, type FeedErrorKind, type FeedPost } from '../api/pixelfed';
-import { HOME_INSTANCE } from '../config';
+import { HOME_INSTANCE, profileUrl } from '../config';
 import { fetchDailyBonus, type DailyBonus } from '../api/dailyBonus';
 import { fetchXkcdBonus, comicUrl, type XkcdBonus } from '../api/xkcd';
 import { fetchPendingRequestCount } from '../api/social';
+import { avatarSrc } from '../components/accountRow';
 import { getLastTriggerTime, getNextTriggerTime, formatShortDateTime, formatCountdown, formatRelativeTime } from '../timer';
 
-export function renderFeed(onRequestCapture: () => void, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenGrid: () => void, onOpenCircle: () => void, onOpenPeer: (account: FeedPost['account']) => void, onPostCountChange: (count: number) => void): HTMLElement {
+export function renderFeed(onRequestCapture: () => void, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenGrid: () => void, onOpenCircle: () => void, onPostCountChange: (count: number) => void): HTMLElement {
   const auth = getAuthState();
   const el = document.createElement('div');
   el.className = 'min-h-dvh flex flex-col bg-cream';
@@ -89,8 +90,8 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
   header.querySelector('#btn-open-circle')?.addEventListener('click', onOpenCircle);
 
   if (auth) {
-    setupRefresh(el, body, content, auth, postCount, onOpenPost, onOpenPeer, onPostCountChange);
-    loadFeed(content, auth, postCount, onOpenPost, onOpenPeer, onPostCountChange);
+    setupRefresh(el, body, content, auth, postCount, onOpenPost, onPostCountChange);
+    loadFeed(content, auth, postCount, onOpenPost, onPostCountChange);
     // Mark the circle icon when follow requests are waiting.
     void fetchPendingRequestCount(auth).then(count => {
       const circleBtn = header.querySelector('#btn-open-circle');
@@ -107,7 +108,7 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
 // Pull-to-refresh + foreground refresh. iOS standalone PWAs have no native
 // pull-to-refresh, and Android's is disabled via overscroll-behavior (style.css),
 // so this custom gesture is the single source of truth on both platforms.
-function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenPeer: (account: FeedPost['account']) => void, onPostCountChange: (count: number) => void): void {
+function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void, onPostCountChange: (count: number) => void): void {
   const PULL_THRESHOLD = 70; // px of (damped) pull needed to trigger a refresh
   const PULL_MAX = 110;
   let refreshing = false;
@@ -151,7 +152,7 @@ function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, 
     body.style.transition = 'transform 0.2s ease';
     body.style.transform = 'translateY(0)';
     try {
-      await loadFeed(content, auth, postCount, onOpenPost, onOpenPeer, onPostCountChange, true, true);
+      await loadFeed(content, auth, postCount, onOpenPost, onPostCountChange, true, true);
     } finally {
       resetPull();
       refreshing = false;
@@ -206,7 +207,7 @@ function setupRefresh(el: HTMLElement, body: HTMLElement, content: HTMLElement, 
 // (used by pull-to-refresh and foreground refresh, where the loading cue lives
 // elsewhere); on failure it leaves the current feed untouched.
 // `force` bypasses the home-timeline cache TTL (explicit user refresh).
-async function loadFeed(container: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void, onOpenPeer: (account: FeedPost['account']) => void, onPostCountChange: (count: number) => void, silent = false, force = false): Promise<void> {
+async function loadFeed(container: HTMLElement, auth: AuthState, postCount: number, onOpenPost: (post: FeedPost) => void, onPostCountChange: (count: number) => void, silent = false, force = false): Promise<void> {
 
   if (!silent) {
     container.innerHTML = `
@@ -223,7 +224,7 @@ async function loadFeed(container: HTMLElement, auth: AuthState, postCount: numb
     if (silent) return;
     const kind = await classifyFeedError(err, getLastFeedUrl());
     if (!container.isConnected) return;
-    renderFeedError(container, kind, auth, () => loadFeed(container, auth, postCount, onOpenPost, onOpenPeer, onPostCountChange));
+    renderFeedError(container, kind, auth, () => loadFeed(container, auth, postCount, onOpenPost, onPostCountChange));
     return;
   }
 
@@ -246,7 +247,7 @@ async function loadFeed(container: HTMLElement, auth: AuthState, postCount: numb
     `;
   } else {
     const unblurred = postCount > 0;
-    posts.forEach(post => container.appendChild(makePostCard(post, unblurred, auth, onOpenPost, onOpenPeer)));
+    posts.forEach(post => container.appendChild(makePostCard(post, unblurred, auth.instance, onOpenPost)));
   }
 
   // Bonus cards (xkcd, then Wikimedia picture of the day) fill the
@@ -388,16 +389,17 @@ function makeXkcdCard(bonus: XkcdBonus): HTMLElement {
   return card;
 }
 
-function makePostCard(post: FeedPost, unblurred: boolean, auth: AuthState, onOpenPost: (post: FeedPost) => void, onOpenPeer: (account: FeedPost['account']) => void): HTMLElement {
+function makePostCard(post: FeedPost, unblurred: boolean, instance: string, onOpenPost: (post: FeedPost) => void): HTMLElement {
   const card = document.createElement('article');
   card.className = 'border-b border-ink/8';
 
   // Header
   const header = document.createElement('div');
-  header.className = 'flex items-center gap-3 px-4 py-3';
+  header.className = 'flex items-center gap-3 px-4 py-3 cursor-pointer';
+  header.addEventListener('click', () => window.open(profileUrl(instance, post.account.acct), '_blank', 'noopener'));
 
   const avatar = document.createElement('img');
-  avatar.src = post.account.avatarUrl;
+  avatar.src = avatarSrc(post.account.avatarUrl);
   avatar.className = 'w-9 h-9 rounded-full object-cover bg-gold-light shrink-0';
   avatar.alt = '';
   header.appendChild(avatar);
@@ -416,10 +418,6 @@ function makePostCard(post: FeedPost, unblurred: boolean, auth: AuthState, onOpe
   info.appendChild(metaEl);
 
   header.appendChild(info);
-  if (post.account.id !== auth.accountId) {
-    header.classList.add('cursor-pointer');
-    header.addEventListener('click', () => onOpenPeer(post.account));
-  }
   card.appendChild(header);
 
   // Image wrapper

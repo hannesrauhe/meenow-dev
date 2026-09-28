@@ -5,7 +5,9 @@
 import { CHEVRON_LEFT_ICON } from '../icons';
 import type { AuthState } from '../api/auth';
 import { resolveHandle, fetchRelationships, type Connection, type Relationship } from '../api/social';
+import { profileUrl } from '../config';
 import { makeConnectButton } from '../components/connectButton';
+import { avatarSrc } from '../components/accountRow';
 
 export function renderConnectLanding(auth: AuthState, handle: string, onDone: () => void): HTMLElement {
   const root = document.createElement('div');
@@ -88,7 +90,7 @@ function renderCard(
   card.className = 'flex flex-col items-center gap-3 px-6 py-12 text-center';
 
   const avatar = document.createElement('img');
-  avatar.src = conn.avatarUrl;
+  avatar.src = avatarSrc(conn.avatarUrl);
   avatar.className = 'w-20 h-20 rounded-full object-cover bg-gold-light';
   avatar.alt = '';
   card.appendChild(avatar);
@@ -98,9 +100,12 @@ function renderCard(
   name.textContent = conn.displayName;
   card.appendChild(name);
 
-  const handleEl = document.createElement('p');
-  handleEl.className = 'text-sm text-ink/40';
-  handleEl.textContent = `@${conn.acct}`;
+  const handleEl = document.createElement('a');
+  handleEl.href = profileUrl(auth.instance, conn.acct);
+  handleEl.target = '_blank';
+  handleEl.rel = 'noopener noreferrer';
+  handleEl.className = 'text-sm text-ink/40 underline underline-offset-2';
+  handleEl.textContent = `@${conn.acct} ↗`;
   card.appendChild(handleEl);
 
   const status = document.createElement('p');
