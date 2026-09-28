@@ -19,6 +19,7 @@ import { approveGroupMembers } from '../api/groupAuto';
 import { fetchRelationships, resolveHandle, type Relationship } from '../api/social';
 import { makeConnectButton } from '../components/connectButton';
 import { makeAccountRow } from '../components/accountRow';
+import { profileUrl } from '../config';
 
 export function renderGroupJoin(auth: AuthState, token: string, onDone: () => void): HTMLElement {
   const root = document.createElement('div');
@@ -216,6 +217,7 @@ function renderMemberRows(
       displayName: m.acct.split('@')[0] || m.acct,
       handle: m.acct,
       avatarUrl: placeholderAvatar(m.acct),
+      profileUrl: id ? profileUrl(auth.instance, m.acct) : undefined,
     });
     if (id) {
       const btn = makeConnectButton(auth, id, rels.get(id), (r) => {

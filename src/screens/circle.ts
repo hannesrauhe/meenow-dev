@@ -126,11 +126,11 @@ async function loadCircle(
   const inviteHandle = account.acct.includes('@') ? account.acct : `${account.acct}@${auth.instance}`;
 
   container.innerHTML = '';
-  container.appendChild(makeInviteBlock(inviteHandle));
   if (groups.length > 0) {
     container.appendChild(makeGroupsSection(auth, groups,
       () => loadCircle(container, auth, onOpenGroup), onOpenGroup));
   }
+  container.appendChild(makeInviteBlock(inviteHandle));
   if (requests.length > 0) {
     container.appendChild(makeRequestsSection(auth, requests, () => loadCircle(container, auth, onOpenGroup)));
   }

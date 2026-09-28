@@ -14,6 +14,7 @@ import {
   GroupApiError, type GroupBan, type GroupMember,
 } from '../api/groups';
 import { makeAccountRow } from '../components/accountRow';
+import { profileUrl } from '../config';
 
 export function renderGroupMembers(
   auth: AuthState,
@@ -125,6 +126,7 @@ function memberRow(
     displayName: m.acct.split('@')[0] || m.acct,
     handle: m.acct,
     avatarUrl: placeholderAvatar(m.acct),
+    profileUrl: isSelf ? undefined : profileUrl(auth.instance, m.acct),
   });
 
   if (isSelf) {
