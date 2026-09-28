@@ -483,13 +483,13 @@ function makeCircleSection(
         <div class="w-36 h-24">${SLEEPING_CAT}</div>
         <p class="text-sm">${groupManaged
           ? 'Everyone you follow is in one of your groups.'
-          : 'Your circle is empty — invite a friend to get started.'}</p>
+          : 'No one-to-one connections yet — invite a friend to get started.'}</p>
       </div>
     `;
     return section;
   }
 
-  section.appendChild(makeSectionHeading(`Your circle · ${mutuals.length}`));
+  section.appendChild(makeSectionHeading(`One-to-one · ${mutuals.length}`));
   for (const c of mutuals) section.appendChild(makePeerRow(auth, c, rels.get(c.id), reload));
 
   if (oneWay.length > 0) {
