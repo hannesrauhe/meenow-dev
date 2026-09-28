@@ -26,7 +26,13 @@ $cfg = ["home_instance" => "pixelfed.social",
               "key_file" => "/app/config/vapid.json"],
   "cron_key" => "testkey123",
   "rate_limit" => ["window_s" => 60, "max" => 5],
-  "xkcd_cache" => "/tmp/xkcd.json"];
+  "xkcd_cache" => "/tmp/xkcd.json",
+  // The suite runs on dummy Bearer tokens with no reachable instance, so the
+  // identity check that production relies on has to be off here. Everything else
+  // about invites, admin and bans is exercised for real.
+  "verify_group_accounts" => false,
+  "invite_ttl_s" => 14400,
+  "invite_max_uses" => 5];
 file_put_contents("/app/config/config.php", "<?php return " . var_export($cfg, true) . ";");'
 [ -s config/config.php ] && ok "config written" || bad "config written" "empty"
 
@@ -114,23 +120,121 @@ GOUT=$(php scripts/groups.php add test pixelfed.social:1 alice@pixelfed.social 2
 check "groups 401 no auth" 'authorization_required' "$(H GET http://127.0.0.1:8080/groups/test)"
 CLR
 check "groups show" 'alice@pixelfed.social' "$(MEENOW_AUTH='Bearer t' H GET http://127.0.0.1:8080/groups/test)"
-check "groups join" '"ok":true' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/join \
+# The admin is derived, never stored: the oldest member row. Alice was seeded,
+# so she runs the group, and a later joiner does not.
+check "groups admin is oldest" '"admin":true' "$(MEENOW_AUTH='Bearer t' H GET 'http://127.0.0.1:8080/groups/test?account=pixelfed.social:1')"
+check "groups non-admin" '"admin":false' "$(MEENOW_AUTH='Bearer t' H GET 'http://127.0.0.1:8080/groups/test?account=pixelfed.social:7')"
+CLR
+
+# --- invites: a link carries a token, never the group slug ------------------
+GOUT=$(php scripts/groups.php invite test 2>&1) && ok "groups CLI invite" || bad "groups CLI invite" "$GOUT"
+TOKEN=$(printf '%s' "$GOUT" | sed -n 's/^token  *//p')
+case "$TOKEN" in *[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ok "invite token minted";; *) bad "invite token minted" "$GOUT";; esac
+check "redeem previews roster" 'alice@pixelfed.social' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/redeem "{\"token\":\"$TOKEN\"}")"
+check "redeem unknown token" 'invite_not_found' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/redeem '{"token":"00000000000000000000000000000000"}')"
+# A wrong-length token is rejected on shape, without a lookup: probes and typos
+# cannot spend rate-limit budget on the database.
+check "redeem malformed token" 'invite_not_found' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/redeem '{"token":"nope"}')"
+CLR
+# Redeeming must not consume anything — a link can be opened, abandoned, reopened.
+check "redeem does not consume" '0' "$(php -r '$c=require "config/config.php"; echo (new PDO("mysql:host=".$c["db"]["host"].";dbname=".$c["db"]["name"], $c["db"]["user"], $c["db"]["pass"]))->query("SELECT uses FROM group_invites WHERE token=\"'"$TOKEN"'\"")->fetchColumn();')"
+
+# --- expiry and exhaustion --------------------------------------------------
+php -r '$c=require "config/config.php"; $p=new PDO("mysql:host=".$c["db"]["host"].";dbname=".$c["db"]["name"],$c["db"]["user"],$c["db"]["pass"]); $p->prepare("INSERT INTO group_invites (token,group_id,expires_at,max_uses) VALUES (?,?,?,?)")->execute(["deadbeefdeadbeefdeadbeefdeadbeef","test",time()-10,5]); $p->prepare("INSERT INTO group_invites (token,group_id,expires_at,max_uses,uses,last_used_by) VALUES (?,?,?,?,?,?)")->execute(["beefbeefbeefbeefbeefbeefbeefbeef","test",time()+3600,1,1,"pixelfed.social:99"]);'
+check "expired invite" 'invite_expired' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/redeem '{"token":"deadbeefdeadbeefdeadbeefdeadbeef"}')"
+check "exhausted invite" 'invite_exhausted' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/join \
+  '{"account":"pixelfed.social:8","acct":"carol@pixelfed.social","token":"beefbeefbeefbeefbeefbeefbeefbeef"}')"
+CLR
+
+# A stranger needs a token to enter; a member does not need one to stay.
+check "join needs token" 'invite_required' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/join \
   '{"account":"pixelfed.social:7","acct":"bob@pixelfed.social"}')"
-check "groups join idempotent" '"ok":true' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/join \
-  '{"account":"pixelfed.social:7","acct":"bob@pixelfed.social"}')"
+check "groups join" '"joined":true' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/join \
+  "{\"account\":\"pixelfed.social:7\",\"acct\":\"bob@pixelfed.social\",\"token\":\"$TOKEN\"}")"
+# Re-joining is idempotent and says so, so the app can skip the follow-all.
+check "groups join idempotent" '"joined":false' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/join \
+  "{\"account\":\"pixelfed.social:7\",\"acct\":\"bob@pixelfed.social\",\"token\":\"$TOKEN\"}")"
 check "groups mine" '"test"' "$(MEENOW_AUTH='Bearer t' H GET 'http://127.0.0.1:8080/groups/mine?account=pixelfed.social:7')"
+# uses counts DISTINCT accounts (last_used_by), so Bob's retry did not shrink a
+# 5-use link. The cap guards against a link being passed around, not retries.
+USES=$(php -r '$c=require "config/config.php"; echo (new PDO("mysql:host=".$c["db"]["host"].";dbname=".$c["db"]["name"], $c["db"]["user"], $c["db"]["pass"]))->query("SELECT uses FROM group_invites WHERE token=\"'"$TOKEN"'\"")->fetchColumn();')
+check "invite use counted once per account" '1' "$USES"
+CLR
+
+# --- events: what a member's device must act on -----------------------------
+check "events reach members" '"kind":"join"' "$(MEENOW_AUTH='Bearer t' H GET 'http://127.0.0.1:8080/groups/events?account=pixelfed.social:1&since=0')"
+# A newcomer is not told about their own join.
+check "events skip own join" '"events":[]' "$(MEENOW_AUTH='Bearer t' H GET 'http://127.0.0.1:8080/groups/events?account=pixelfed.social:7&since=0')"
+# The high-water mark works: asking from the newest id returns nothing.
+check "events since respected" '"events":[]' "$(MEENOW_AUTH='Bearer t' H GET 'http://127.0.0.1:8080/groups/events?account=pixelfed.social:1&since=999999')"
+CLR
+
+# --- removal: admin-only, and it bans ---------------------------------------
+check "remove by non-admin" 'not_admin' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/remove \
+  '{"account":"pixelfed.social:1","actor":"pixelfed.social:7"}')"
+# Removing yourself is leaving, which is a different verb with different effects.
+check "remove self refused" 'cannot_remove_self' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/remove \
+  '{"account":"pixelfed.social:1","actor":"pixelfed.social:1"}')"
+check "groups remove" '"ok":true' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/remove \
+  '{"account":"pixelfed.social:7","actor":"pixelfed.social:1"}')"
+CLR
+# A ban blocks both doors, so a kick cannot be undone with the same link — and
+# redeem refuses before the join screen even shows the roster.
+check "banned cannot join" 'banned' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/join \
+  "{\"account\":\"pixelfed.social:7\",\"acct\":\"bob@pixelfed.social\",\"token\":\"$TOKEN\"}")"
+check "banned cannot redeem" 'banned' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/redeem \
+  "{\"token\":\"$TOKEN\",\"account\":\"pixelfed.social:7\"}")"
+check "bans listed for admin" 'bob@pixelfed.social' "$(MEENOW_AUTH='Bearer t' H GET 'http://127.0.0.1:8080/groups/test?account=pixelfed.social:1')"
+check "bans hidden from member" '"admin":false' "$(MEENOW_AUTH='Bearer t' H GET 'http://127.0.0.1:8080/groups/test?account=pixelfed.social:7')"
+CLR
+# The removal must reach the remaining members AND its subject: the subject is no
+# longer in group_members, so this is the only way their device learns about it.
+check "remove event for admin" '"kind":"remove"' "$(MEENOW_AUTH='Bearer t' H GET 'http://127.0.0.1:8080/groups/events?account=pixelfed.social:1&since=0')"
+check "remove event for target" '"kind":"remove"' "$(MEENOW_AUTH='Bearer t' H GET 'http://127.0.0.1:8080/groups/events?account=pixelfed.social:7&since=0')"
+# The ban set rides along so a device can refuse to auto-approve the ex-member's
+# follow request, which is what would otherwise silently undo the kick.
+check "bans ride with events" '"bans":[{' "$(MEENOW_AUTH='Bearer t' H GET 'http://127.0.0.1:8080/groups/events?account=pixelfed.social:1&since=0')"
+CLR
+
+# Unban, then the same token lets Bob back in — proving the block, not the link,
+# was what refused him. The member row is not restored by the unban.
+check "groups unban" '"ok":true' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/unban \
+  '{"account":"pixelfed.social:7","actor":"pixelfed.social:1"}')"
+check "unban by non-admin" 'not_admin' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/unban \
+  '{"account":"pixelfed.social:7","actor":"pixelfed.social:8"}')"
+check "unbanned can rejoin" '"joined":true' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/join \
+  "{\"account\":\"pixelfed.social:7\",\"acct\":\"bob@pixelfed.social\",\"token\":\"$TOKEN\"}")"
+# No member here has a push subscription, so the fan-out reports finding nobody
+# rather than reaching the network.
+check "groups announce" '"ok":true' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/announce)"
+CLR
+
 check "groups leave" '"ok":true' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/leave \
   '{"account":"pixelfed.social:7"}')"
-CLR
 check "groups leave removed" '"groups":[]' "$(MEENOW_AUTH='Bearer t' H GET 'http://127.0.0.1:8080/groups/mine?account=pixelfed.social:7')"
 check "groups join unknown" 'group_not_found' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/nope/join \
   '{"account":"pixelfed.social:7","acct":"bob@pixelfed.social"}')"
 check "groups join bad account" 'invalid_account' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/test/join \
   '{"account":"not-an-account"}')"
-# The joiner is gone but the seeded founding member remains.
+check "groups invite by stranger" 'not_member' "$(MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/groups/invite \
+  '{"group":"test","account":"pixelfed.social:8"}')"
+CLR
+
+# --- operator CLI over the churned-up group ---------------------------------
+GOUT=$(php scripts/groups.php invite test 2>&1) && ok "invite after churn" 'token' "$GOUT" || bad "invite after churn" "$GOUT"
+# The joiner left; the seeded founding member remains, and holds the admin role.
 GMEM=$(php scripts/groups.php members test 2>&1)
 check "groups CLI members" 'alice@pixelfed.social' "$GMEM"
-case "$GMEM" in *bob*) bad "groups leave via CLI view" "bob still present: $GMEM";; *) ok "groups leave removed (CLI view)";; esac
+case "$GMEM" in *bob*) bad "groups leave (CLI view)" "bob still present: $GMEM";; *) ok "groups leave (CLI view)";; esac
+case "$GMEM" in *ADMIN*) ok "CLI marks the admin";; *) bad "CLI marks the admin" "$GMEM";; esac
+check "groups CLI invites" 'live' "$(php scripts/groups.php invites test 2>&1)"
+check "groups CLI prune" 'pruned' "$(php scripts/groups.php prune 2>&1)"
+# The expired row is gone; the live ones survive pruning.
+LEFT=$(php -r '$c=require "config/config.php"; echo (new PDO("mysql:host=".$c["db"]["host"].";dbname=".$c["db"]["name"], $c["db"]["user"], $c["db"]["pass"]))->query("SELECT COUNT(*) FROM group_invites WHERE token=\"deadbeefdeadbeefdeadbeefdeadbeef\"")->fetchColumn();')
+check "prune removed expired only" '0' "$LEFT"
+check "groups CLI ban" 'banned' "$(php scripts/groups.php ban test pixelfed.social:8 carol@pixelfed.social 2>&1)"
+check "groups CLI unban" 'unbanned' "$(php scripts/groups.php unban test pixelfed.social:8 2>&1)"
+check "groups CLI list admin" 'admin=pixelfed.social:1' "$(php scripts/groups.php list 2>&1)"
 
 # Cron: tick runs (1 sub left), immediate rerun dedupes.
 check "cron tick" '"subscriptions":1' "$(H GET 'http://127.0.0.1:8080/cron?action=tick&key=testkey123')"

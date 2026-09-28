@@ -93,17 +93,25 @@ export function clearPendingAdd(): void {
   localStorage.removeItem('meenow:pending-add');
 }
 
-// A group id from an invite deep link (?group=), carried through the OAuth
-// redirect exactly like pending-add above.
-export function getPendingGroup(): string | null {
-  return localStorage.getItem('meenow:pending-group');
+// An invite token from a deep link (?join=), carried through the OAuth redirect
+// exactly like pending-add above. It holds the TOKEN and never the group slug:
+// the slug is only ever learned by redeeming the token, which is what keeps a
+// shared link from making the group discoverable.
+//
+// The key used to be meenow:pending-group and held a slug. It is cleared
+// alongside the new one — a slug left behind from an old install would only ever
+// be rejected by the redeem endpoint, and silently dropping it is kinder than
+// showing someone a broken link for a group they may well still be in.
+export function getPendingJoin(): string | null {
+  return localStorage.getItem('meenow:pending-join');
 }
 
-export function setPendingGroup(id: string): void {
-  localStorage.setItem('meenow:pending-group', id);
+export function setPendingJoin(token: string): void {
+  localStorage.setItem('meenow:pending-join', token);
 }
 
-export function clearPendingGroup(): void {
+export function clearPendingJoin(): void {
+  localStorage.removeItem('meenow:pending-join');
   localStorage.removeItem('meenow:pending-group');
 }
 

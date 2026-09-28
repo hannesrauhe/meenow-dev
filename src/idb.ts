@@ -14,6 +14,15 @@ export const IDB_KEYS = {
   // every period with no cleanup, like digestShownTriggerMs.
   dailyShownTriggerMs: 'daily-shown-trigger-ms',
   dailyShownCount: 'daily-shown-count',
+  // Highest group_events id this device has already acted on. Both the push
+  // handler and the app's catch-up poll write it, and both read it first, so a
+  // join delivered twice is approved once.
+  groupEventSeen: 'group-event-seen',
+  // Accounts banned from a group this device belongs to, as ["<groupId>",
+  // "<account>"] pairs. Needed because a banned person's follow request outlives
+  // their membership, so auto-approve must consult it — otherwise the next
+  // request would be approved and quietly undo the kick.
+  groupBans: 'group-bans',
 } as const;
 
 export interface StoredAuth {

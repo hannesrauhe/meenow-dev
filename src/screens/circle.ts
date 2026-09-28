@@ -13,12 +13,13 @@ import {
 import { isLockedApplied, setLockedApplied } from '../state';
 import { makeAccountRow } from '../components/accountRow';
 import { makeConnectButton } from '../components/connectButton';
-import { fetchMyGroups, leaveGroup, type Group } from '../api/groups';
+import { fetchMyGroups, leaveGroup, createInvite, type Group } from '../api/groups';
 
 export function renderCircle(
   auth: AuthState,
   onBack: () => void,
   onOpenPeer: (peer: Connection) => void,
+  onOpenGroup: (groupId: string) => void,
 ): HTMLElement {
   const root = document.createElement('div');
   root.id = 'screen-circle';
@@ -47,7 +48,7 @@ export function renderCircle(
   content.className = 'flex-1';
   root.appendChild(content);
 
-  loadCircle(content, auth, onOpenPeer);
+  loadCircle(content, auth, onOpenPeer, onOpenGroup);
   return root;
 }
 
@@ -55,6 +56,7 @@ async function loadCircle(
   container: HTMLElement,
   auth: AuthState,
   onOpenPeer: (peer: Connection) => void,
+  onOpenGroup: (groupId: string) => void,
 ): Promise<void> {
   container.innerHTML = `
     <div class="flex items-center justify-center py-20">
@@ -66,7 +68,7 @@ async function loadCircle(
   try {
     account = await fetchMyAccount(auth);
   } catch {
-    showError(container, () => loadCircle(container, auth, onOpenPeer));
+    showError(container, () => loadCircle(container, auth, onOpenPeer, onOpenGroup));
     return;
   }
   if (!container.isConnected) return;
@@ -89,7 +91,7 @@ async function loadCircle(
       fetchMyGroups(auth),
     ]);
   } catch {
-    showError(container, () => loadCircle(container, auth, onOpenPeer));
+    showError(container, () => loadCircle(container, auth, onOpenPeer, onOpenGroup));
     return;
   }
   if (!container.isConnected) return;
@@ -111,15 +113,16 @@ async function loadCircle(
   container.innerHTML = '';
   container.appendChild(makeInviteBlock(inviteHandle));
   if (groups.length > 0) {
-    container.appendChild(makeGroupsSection(auth, groups, () => loadCircle(container, auth, onOpenPeer)));
+    container.appendChild(makeGroupsSection(auth, groups,
+      () => loadCircle(container, auth, onOpenPeer, onOpenGroup), onOpenGroup));
   }
   if (requests.length > 0) {
-    container.appendChild(makeRequestsSection(auth, requests, () => loadCircle(container, auth, onOpenPeer)));
+    container.appendChild(makeRequestsSection(auth, requests, () => loadCircle(container, auth, onOpenPeer, onOpenGroup)));
   }
   if (followsYou.length > 0) {
-    container.appendChild(makeFollowsYouSection(auth, followsYou, rels, onOpenPeer, () => loadCircle(container, auth, onOpenPeer)));
+    container.appendChild(makeFollowsYouSection(auth, followsYou, rels, onOpenPeer, () => loadCircle(container, auth, onOpenPeer, onOpenGroup)));
   }
-  container.appendChild(makeCircleSection(auth, following, followsYou.length, rels, onOpenPeer, () => loadCircle(container, auth, onOpenPeer)));
+  container.appendChild(makeCircleSection(auth, following, followsYou.length, rels, onOpenPeer, () => loadCircle(container, auth, onOpenPeer, onOpenGroup)));
   container.appendChild(makeLockRow(auth, lockedNow));
 }
 
@@ -163,10 +166,16 @@ function makeInviteBlock(handle: string): HTMLElement {
   return wrap;
 }
 
-// Bootstrap groups the user has joined (see server/src/groups.php). Offers the
-// same invite link for the group and a two-tap leave; the circle itself is
-// unaffected by leaving — the group is only the bootstrap roster.
-function makeGroupsSection(auth: AuthState, groups: Group[], reload: () => void): HTMLElement {
+// Bootstrap groups the user has joined (see server/src/groups.php). Offers an
+// invite link and a two-tap leave; the circle itself is unaffected by leaving —
+// the group is only the bootstrap roster. The admin (the oldest member) also gets
+// a label and a tap-through to the roster, where members can be removed.
+function makeGroupsSection(
+  auth: AuthState,
+  groups: Group[],
+  reload: () => void,
+  onOpenGroup: (groupId: string) => void,
+): HTMLElement {
   const section = document.createElement('div');
   section.className = 'border-b border-ink/8';
   section.appendChild(makeSectionHeading(`Groups · ${groups.length}`));
@@ -190,9 +199,23 @@ function makeGroupsSection(auth: AuthState, groups: Group[], reload: () => void)
     info.appendChild(nameEl);
     const metaEl = document.createElement('p');
     metaEl.className = 'text-xs text-ink/40 truncate';
-    metaEl.textContent = 'meenow group';
+    metaEl.textContent = g.admin ? 'meenow group · admin' : 'meenow group';
     info.appendChild(metaEl);
     row.appendChild(info);
+
+    // Only the admin has anything to manage, so only their row is tappable — a
+    // plain member tapping through to a list they cannot act on would be a
+    // dead end with a misleading affordance.
+    if (g.admin) {
+      row.className = `${row.className} cursor-pointer active:bg-ink/5`;
+      row.setAttribute('role', 'button');
+      row.tabIndex = 0;
+      row.addEventListener('click', () => onOpenGroup(g.id));
+      row.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenGroup(g.id); }
+      });
+    }
+
     const actions = document.createElement('div');
     actions.className = 'shrink-0 flex items-center gap-2';
     row.appendChild(actions);
@@ -200,7 +223,7 @@ function makeGroupsSection(auth: AuthState, groups: Group[], reload: () => void)
     const shareBtn = document.createElement('button');
     shareBtn.className = 'text-xs rounded-full px-3 py-1.5 border border-gold/40 text-gold';
     shareBtn.textContent = 'Invite';
-    shareBtn.addEventListener('click', () => void shareGroup(g.id, shareBtn));
+    shareBtn.addEventListener('click', () => void shareGroup(auth, g.id, shareBtn));
     actions.appendChild(shareBtn);
 
     const leaveBtn = document.createElement('button');
@@ -237,18 +260,37 @@ const GROUP_AVATAR = `data:image/svg+xml,${encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72"><rect width="72" height="72" rx="36" fill="#F3E8D0"/><circle cx="28" cy="30" r="9" fill="#B08947"/><circle cx="45" cy="33" r="7" fill="#B08947" opacity="0.7"/><path d="M14 56c2-10 10-14 14-14s12 4 14 14z" fill="#B08947"/><path d="M38 56c1-7 5-10 7-10s6 3 7 10z" fill="#B08947" opacity="0.7"/></svg>',
 )}`;
 
-async function shareGroup(groupId: string, btn: HTMLButtonElement): Promise<void> {
-  const url = `${window.location.origin}/?group=${encodeURIComponent(groupId)}`;
+// Mint a fresh invite and share it. The link carries a random token, never the
+// group slug, so sharing it grants access without publishing the group — and it
+// stops working on its own (a few hours, a handful of people). Minting per share
+// rather than reusing one permanent link is what makes "I sent that to the wrong
+// chat" a non-event.
+async function shareGroup(auth: AuthState, groupId: string, btn: HTMLButtonElement): Promise<void> {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '…';
+  let url: string;
+  try {
+    const invite = await createInvite(auth, groupId);
+    url = `${window.location.origin}/?join=${encodeURIComponent(invite.token)}`;
+  } catch {
+    btn.disabled = false;
+    btn.textContent = 'Try again';
+    window.setTimeout(() => { btn.textContent = original; }, 2000);
+    return;
+  }
+  btn.disabled = false;
+
   if (navigator.share) {
     try {
-      await navigator.share({ title: 'meenow', text: 'Join this meenow group', url });
+      await navigator.share({ title: 'meenow', text: 'Join my meenow group', url });
+      btn.textContent = original;
       return;
     } catch { /* user cancelled or share failed — fall back to copy */ }
   }
-  const original = btn.textContent;
   try {
     await navigator.clipboard.writeText(url);
-    btn.textContent = 'Copied';
+    btn.textContent = 'Link copied';
   } catch {
     btn.textContent = 'Copy failed';
   }

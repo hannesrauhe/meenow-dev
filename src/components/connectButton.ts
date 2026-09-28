@@ -3,7 +3,7 @@
 // connect-landing screens. The state→label mapping is the single source of truth
 // for how a connection is presented across the app.
 import type { AuthState } from '../api/auth';
-import { connectTo, unfollow, removeFollower, fetchRelationships, type Relationship } from '../api/social';
+import { connectTo, disconnect, unfollow, type Relationship } from '../api/social';
 
 const PILL = 'text-xs rounded-full px-3 py-1.5 border transition-colors';
 const ACTIVE = `${PILL} text-gold border-gold/40`;
@@ -61,24 +61,9 @@ export function makeConnectButton(
     }
   };
 
-  // Full severance: unfollow them AND (when they follow us) drop them from our
-  // followers. In a followers-only app the removal is the point — unfollowing
-  // alone would leave them reading your daily photos. Partial success still
-  // counts (the refreshed relationship shows the truth); an instance without
-  // the remove endpoint degrades to a plain unfollow instead of a dead button.
-  const disconnect = async (removeThem: boolean): Promise<Relationship> => {
-    const [un, rm] = await Promise.allSettled([
-      unfollow(auth, accountId),
-      removeThem ? removeFollower(auth, accountId) : Promise.resolve(),
-    ]);
-    if (un.status === 'rejected' && (!removeThem || rm.status === 'rejected')) {
-      throw un.reason as Error;
-    }
-    const rel = (await fetchRelationships(auth, [accountId])).get(accountId);
-    if (rel) return rel;
-    throw new Error('Could not refresh relationship');
-  };
-
+  // Full severance lives in social.ts (`disconnect`) because the service worker
+  // performs the same two calls automatically when a group member is removed —
+  // one implementation, so a manual tap and the automatic sweep cannot drift.
   btn.addEventListener('click', () => {
     const r = state;
     if (r?.blocking || r?.blockedBy) return;
@@ -94,7 +79,7 @@ export function makeConnectButton(
         window.setTimeout(() => { if (confirming) apply(); }, 3000);
         return;
       }
-      void run(() => disconnect(r.followedBy));
+      void run(() => disconnect(auth, accountId, r.followedBy));
       return;
     }
     // Pending request: two-tap cancel (Pixelfed's unfollow endpoint also

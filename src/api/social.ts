@@ -1,9 +1,13 @@
 // Social graph client: handle resolution, follow/unfollow, relationships, follow
 // requests, peer connection lists, and account lock state. Encapsulates the
-// "one-tap mutual" semantics meenow uses for its small friend circles. SW-unsafe
-// (uses no DOM, but is app-only) — keep separate from pixelfed.ts, which owns the
+// "one-tap mutual" semantics meenow uses for its small friend circles.
+//
+// Runs in BOTH the app and the service worker: the SW approves incoming group
+// members and severs removed ones, and it must not grow a second copy of those
+// rules. That means no DOM and no localStorage here — see `origin()` for the one
+// thing that used to block it. Kept separate from pixelfed.ts, which owns the
 // post/feed lifecycle and its home-timeline cache.
-import type { AuthState } from './auth';
+import type { AuthState } from './authState';
 import { apiBase } from '../config';
 
 export interface Connection {
@@ -48,6 +52,15 @@ function authHeaders(auth: AuthState): HeadersInit {
   return { Authorization: `Bearer ${auth.accessToken}` };
 }
 
+// Absolute base for turning apiBase()'s possibly-relative paths into fetchable
+// URLs: apiBase returns '' or '/i/<host>' for proxied instances, and a URL needs
+// a base to resolve those. window.location.origin would be the obvious choice and
+// is exactly what made this file app-only; self.location is available in a worker
+// too and is the SAME origin, since the service worker script is served by the app.
+function origin(): string {
+  return self.location.origin;
+}
+
 function toConnection(a: ApiAccount): Connection {
   return {
     id: a.id,
@@ -87,7 +100,7 @@ export async function resolveHandle(auth: AuthState, handle: string): Promise<Co
   }
 
   try {
-    const url = new URL(`${apiBase(auth.instance)}/api/v1/accounts/search`, window.location.origin);
+    const url = new URL(`${apiBase(auth.instance)}/api/v1/accounts/search`, origin());
     url.searchParams.set('q', q);
     url.searchParams.set('resolve', 'true');
     url.searchParams.set('limit', '5');
@@ -99,7 +112,7 @@ export async function resolveHandle(auth: AuthState, handle: string): Promise<Co
   } catch { /* fall through to lookup */ }
 
   try {
-    const url = new URL(`${apiBase(auth.instance)}/api/v1/accounts/lookup`, window.location.origin);
+    const url = new URL(`${apiBase(auth.instance)}/api/v1/accounts/lookup`, origin());
     url.searchParams.set('acct', q);
     const res = await fetch(url.toString(), { headers: authHeaders(auth) });
     if (res.ok) return toConnection(await res.json() as ApiAccount);
@@ -166,7 +179,7 @@ export async function fetchRelationships(auth: AuthState, ids: string[]): Promis
   const unique = [...new Set(ids)].filter(Boolean);
   for (let i = 0; i < unique.length; i += 40) {
     const chunk = unique.slice(i, i + 40);
-    const url = new URL(`${apiBase(auth.instance)}/api/v1/accounts/relationships`, window.location.origin);
+    const url = new URL(`${apiBase(auth.instance)}/api/v1/accounts/relationships`, origin());
     chunk.forEach(id => url.searchParams.append('id[]', id));
     try {
       const res = await fetch(url.toString(), { headers: authHeaders(auth) });
@@ -285,6 +298,34 @@ export async function acceptAndBackFollow(auth: AuthState, accountId: string): P
   } catch {
     return null;
   }
+}
+
+// Full severance: unfollow them AND (when they follow us) drop them from our
+// followers. In a followers-only app the removal is the point — unfollowing
+// alone would leave them reading your daily photos. Partial success still
+// counts (the refreshed relationship shows the truth); an instance without the
+// remove endpoint degrades to a plain unfollow instead of a dead button.
+//
+// Lives here rather than in the connect button because the service worker needs
+// the exact same behaviour when a group member is removed: severing must not be
+// implemented twice, or the manual tap and the automatic sweep drift apart.
+// `followedBy` is the caller's knowledge of whether they follow us; when unknown,
+// pass true and let the endpoint's failure be tolerated.
+export async function disconnect(
+  auth: AuthState,
+  accountId: string,
+  removeThem: boolean,
+): Promise<Relationship> {
+  const [un, rm] = await Promise.allSettled([
+    unfollow(auth, accountId),
+    removeThem ? removeFollower(auth, accountId) : Promise.resolve(),
+  ]);
+  if (un.status === 'rejected' && (!removeThem || rm.status === 'rejected')) {
+    throw un.reason as Error;
+  }
+  const rel = (await fetchRelationships(auth, [accountId])).get(accountId);
+  if (rel) return rel;
+  throw new Error('Could not refresh relationship');
 }
 
 // --- Pending follow-request count (drives the feed-header badge) ---

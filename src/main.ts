@@ -4,7 +4,7 @@ declare const __GIT_HASH__: string;
 import './style.css';
 import { getAuthState, handleOAuthCallback, dropTokenIfScopesStale } from './api/auth';
 import { getLastTriggerTime, type AppState } from './timer';
-import { MAX_POSTS_PER_TRIGGER, getPendingAdd, setPendingAdd, clearPendingAdd, getPendingGroup, setPendingGroup, clearPendingGroup, clearPwaSubbed } from './state';
+import { MAX_POSTS_PER_TRIGGER, getPendingAdd, setPendingAdd, clearPendingAdd, getPendingJoin, setPendingJoin, clearPendingJoin, clearPwaSubbed } from './state';
 import { fetchTodayPostCount, deletePost, removePostFromCache, resetMyPostsPagerIfStale } from './api/pixelfed';
 import type { Connection } from './api/social';
 import { renderCapture, stopCaptureStreams } from './screens/capture';
@@ -14,6 +14,8 @@ import { renderCircle } from './screens/circle';
 import { renderPeerConnections } from './screens/peerConnections';
 import { renderConnectLanding } from './screens/connectLanding';
 import { renderGroupJoin } from './screens/groupJoin';
+import { renderGroupMembers } from './screens/groupMembers';
+import { catchUpGroupEvents } from './api/groupEvents';
 import { renderLogin } from './screens/login';
 import { renderPostDetail } from './screens/postDetail';
 import type { FeedPost } from './api/pixelfed';
@@ -24,7 +26,7 @@ import { idbSet, IDB_KEYS } from './idb';
 import { resubscribeIfNeeded, syncSubscriptionTz, clearAppBadge, closeDailyNotification } from './notifications';
 
 const app = document.getElementById('app')!;
-type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'grid' | 'circle' | 'peer' | 'connect' | 'group_join';
+type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'grid' | 'circle' | 'peer' | 'connect' | 'group_join' | 'group_members';
 const BASE_SCREENS = new Set<Screen>(['feed', 'login']);
 let activeScreen: Screen | null = null;
 let tickId: number | null = null;
@@ -328,14 +330,26 @@ function mountCircle(): void {
       activeScreen = 'circle';
       app.innerHTML = '';
       installPop();
-      app.appendChild(renderCircle(auth, onBack, openPeer));
+      app.appendChild(renderCircle(auth, onBack, openPeer, openGroup));
+    });
+  };
+
+  // Admin roster management, nested inside the circle exactly like a peer list:
+  // hardware back from it returns to the circle, not the feed.
+  const openGroup = (groupId: string): void => {
+    if (popHandler) { window.removeEventListener('popstate', popHandler); popHandler = null; }
+    mountGroupMembers(groupId, () => {
+      activeScreen = 'circle';
+      app.innerHTML = '';
+      installPop();
+      app.appendChild(renderCircle(auth, onBack, openPeer, openGroup));
     });
   };
 
   const onBack = (): void => { history.back(); };
 
   installPop();
-  app.appendChild(renderCircle(auth, onBack, openPeer));
+  app.appendChild(renderCircle(auth, onBack, openPeer, openGroup));
 }
 
 function mountPeerConnections(peer: Connection, onClose?: () => void): void {
@@ -371,7 +385,7 @@ function mountConnectLanding(handle: string): void {
   app.appendChild(renderConnectLanding(auth, handle, () => { history.back(); }));
 }
 
-function mountGroupJoin(groupId: string): void {
+function mountGroupJoin(token: string): void {
   const auth = getAuthState();
   if (!auth) return;
   activeScreen = 'group_join';
@@ -384,7 +398,27 @@ function mountGroupJoin(groupId: string): void {
   const onPopState = () => { activeScreen = null; tick(); };
   window.addEventListener('popstate', onPopState, { once: true });
 
-  app.appendChild(renderGroupJoin(auth, groupId, () => { history.back(); }));
+  app.appendChild(renderGroupJoin(auth, token, () => { history.back(); }));
+}
+
+// The roster-management overlay an admin opens to remove a member. Same overlay
+// pattern as the peer lists: pushState on open, pop on back, so hardware back
+// returns to the circle rather than the feed.
+function mountGroupMembers(groupId: string, onClose?: () => void): void {
+  const auth = getAuthState();
+  if (!auth) return;
+  activeScreen = 'group_members';
+  app.innerHTML = '';
+  removeInstallNudge();
+  removeNotificationNudge();
+
+  history.pushState({ screen: 'group_members' }, '');
+
+  const returnTo = onClose ?? tick;
+  const onPopState = () => { activeScreen = null; returnTo(); };
+  window.addEventListener('popstate', onPopState, { once: true });
+
+  app.appendChild(renderGroupMembers(auth, groupId, () => { history.back(); }));
 }
 
 function mount(screen: AppState | 'login'): void {
@@ -443,10 +477,11 @@ async function init(): Promise<void> {
   const params = new URLSearchParams(window.location.search);
   const code = params.get('code');
   const add = params.get('add');
-  const group = params.get('group');
-  // Set by the daily-reminder notification tap (issue #56) to open capture.
+  const join = params.get('join');
+  // Set by the daily-reminder notification tap (issue #56) to open capture, or
+  // by a group-event tap to open the circle.
   const action = params.get('action');
-  if (code || add || group || action) {
+  if (code || add || join || action) {
     history.replaceState({}, '', window.location.pathname);
   }
   if (code) {
@@ -458,9 +493,10 @@ async function init(): Promise<void> {
   }
   // Persist an invite handle so it survives the OAuth redirect (redirect_uri has
   // no query string); it is consumed below once authenticated. Same for a group
-  // invite (?group=<id>).
+  // invite (?join=<token>) — the token is the whole capability, so losing it
+  // across the login round-trip would mean losing the invite.
   if (add) setPendingAdd(add);
-  if (group) setPendingGroup(group);
+  if (join) setPendingJoin(join);
 
   // One-time migration: tokens minted before the `follow` scope was requested
   // can't perform relationship writes, so drop them and let the login screen
@@ -512,6 +548,13 @@ async function init(): Promise<void> {
     }
   }
 
+  // Anything that happened while this device was away — a member joining (which
+  // this device must approve) or being removed (which it must sever) — applied
+  // before the first render, so the circle the user sees is already correct
+  // rather than correct a moment later. Fire-and-forget: it must never delay or
+  // block the feed, and it is cheap when nothing happened (one small request).
+  if (auth) void catchUpGroupEvents(auth).catch(() => {});
+
   installBackTrap();
   tick();
   tickId = window.setInterval(tick, 1000);
@@ -520,29 +563,36 @@ async function init(): Promise<void> {
   // handle carried in via ?add= (directly, or through the login redirect).
   // A pending group join takes precedence (it is the onboarding fast path for a
   // fresh account); the pending add survives to the next load.
-  const pendingGroup = getPendingGroup();
+  const pendingJoin = getPendingJoin();
   const pendingAdd = getPendingAdd();
-  if (pendingGroup && getAuthState()) {
-    clearPendingGroup();
-    mountGroupJoin(pendingGroup);
+  if (pendingJoin && getAuthState()) {
+    clearPendingJoin();
+    mountGroupJoin(pendingJoin);
   } else if (pendingAdd && getAuthState()) {
     clearPendingAdd();
     mountConnectLanding(pendingAdd);
   }
 
-  // A daily-reminder notification tap on a cold start lands here via
-  // ?action=capture; open capture on top of the now-mounted feed (issue #56).
+  // A notification tap on a cold start lands here via ?action=…: capture opens
+  // the camera (issue #56), circle opens the follower network (group events).
   if (action === 'capture' && getAuthState()) {
     mountCapture();
+  } else if (action === 'circle' && getAuthState()) {
+    mountCircle();
   }
 
   // Warm case: the app was already open when the notification was tapped, so the
   // service worker focuses the window and posts the intent instead.
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.addEventListener('message', (e: MessageEvent) => {
-      if (e.data?.type === 'notification-action' && e.data.action === 'capture'
-          && getAuthState() && activeScreen !== 'capturing') {
+      if (e.data?.type !== 'notification-action' || !getAuthState()) return;
+      if (e.data.action === 'capture' && activeScreen !== 'capturing') {
         mountCapture();
+      } else if (e.data.action === 'circle' && activeScreen !== 'circle') {
+        mountCircle();
+        // The tap is about a member who just joined or left: re-check for events
+        // the device may have missed, so the circle shown is the current one.
+        void catchUpGroupEvents(getAuthState()!).catch(() => {});
       }
     });
   }
