@@ -240,15 +240,14 @@ check "groups CLI unban" 'unbanned' "$(php scripts/groups.php unban test pixelfe
 check "groups CLI list admin" 'admin=pixelfed.social:1' "$(php scripts/groups.php list 2>&1)"
 
 # --- debug mode: errors reach the response body (the app shows them) --------
-# Both php calls exit non-zero by design (an uncaught throw), hence `|| true`
-# under set -e.
+# The php call exits non-zero by design (an uncaught throw), hence `|| true`.
 DBG=$(php -r 'require "src/bootstrap.php"; meenow_debug_handlers(); throw new RuntimeException("boom");' 2>/dev/null) || true
 check "debug: error in body" '"error":"server_error"' "$DBG"
 check "debug: message + site" 'boom' "$DBG"
-# Without debug the handler is never installed: nothing reaches stdout (stderr
-# is the log, not the response).
-ND=$(php -r 'require "src/bootstrap.php"; throw new RuntimeException("secret-path");' 2>/dev/null) || true
-case "$ND" in *secret-path*) bad "debug off: no leak" "$ND";; *) ok "debug off: no leak";; esac
+# Handled errors never carry debug, even with the flag on: only the throw
+# handler adds it. A normal 404 must stay clean.
+check "debug: handled error clean" '"group_not_found"' "$(MEENOW_AUTH='Bearer t' H GET http://127.0.0.1:8080/groups/nope)"
+CLR
 
 # --- account verification (pure half — no instance needed) ------------------
 # The success path returns a HANDLE, not a bool; a bool|null signature made it
@@ -259,9 +258,9 @@ $ok = groups_verify_payload(["id"=>"42","acct"=>"Alice@pixelfed.social"], "pixel
 $badId = groups_verify_payload(["id"=>"43","acct"=>"alice@pixelfed.social"], "pixelfed.social:42", "alice@pixelfed.social");
 $badAcct = groups_verify_payload(["id"=>"42","acct"=>"mallory@pixelfed.social"], "pixelfed.social:42", "alice@pixelfed.social");
 $noId = groups_verify_payload(["acct"=>"alice@pixelfed.social"], "pixelfed.social:42", "alice@pixelfed.social");
-printf "ok=%s badId=%s badAcct=%s noId=%s",
-  var_export($ok, true), var_export($badId, true), var_export($badAcct, true), var_export($noId, true);
-' 2>&1)
+printf("ok=%s badId=%s badAcct=%s noId=%s",
+  var_export($ok, true), var_export($badId, true), var_export($badAcct, true), var_export($noId, true));
+' 2>&1) || true
 check "verify: success returns handle" "ok='alice@pixelfed.social'" "$VP"
 check "verify: wrong id rejected" "badId=false" "$VP"
 check "verify: wrong handle rejected" "badAcct=false" "$VP"

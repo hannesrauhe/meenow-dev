@@ -76,7 +76,6 @@ function meenow_xkcd_fetch(): ?array
         ]);
         $raw = curl_exec($ch);
         $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-        curl_close($ch);
         if ($raw === false || $status !== 200) return null;
 
         $data = json_decode((string) $raw, true);

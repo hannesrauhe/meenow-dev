@@ -63,7 +63,6 @@ check('outbound https: pixelfed.social', function () {
     curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 15]);
     $ok = curl_exec($ch) !== false;
     $code = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-    curl_close($ch);
     if (!$ok) throw new RuntimeException('curl failed');
     return "HTTP {$code}";
 });
@@ -74,7 +73,6 @@ foreach (['fcm.googleapis.com', 'push.services.mozilla.com', 'web.push.apple.com
         curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 15]);
         $ok = curl_exec($ch) !== false;
         $code = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-        curl_close($ch);
         if (!$ok) throw new RuntimeException('TLS/connect failed');
         return "HTTP {$code} (any response = reachable)";
     });
