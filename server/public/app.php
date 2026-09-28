@@ -21,6 +21,13 @@ if (!is_file($appRoot . '/src/bootstrap.php')) {
     header('Content-Type: text/plain');
     exit("cannot locate app root (src/bootstrap.php) — set MEENOW_APP\n");
 }
+// all-inkl ships no readable PHP error log (error_log unset => error_log()
+// output and uncaught-throwable traces go nowhere an operator can see), which
+// turns every 500 into guesswork. Point it at cache/ — outside the docroot and
+// excluded from install.sh's rsync --delete, so it survives deploys. If cache/
+// does not exist yet, writes fail silently and nothing changes.
+ini_set('error_log', $appRoot . '/cache/php-error.log');
+ini_set('log_errors', '1');
 require $appRoot . '/src/bootstrap.php';
 require $appRoot . '/src/proxy.php';
 
