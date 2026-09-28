@@ -79,7 +79,11 @@ $adminOf = function (string $id) use ($pdo): string {
     return (string) ($st->fetchColumn() ?: '');
 };
 
-$tokenLink = fn(string $token): string => 'https://meenow.de/?join=' . $token;
+// Invite links point at this deployment, so the CLI prints a working link on
+// dev.meenow.de and meenow.de alike. Falls back to production when config.php
+// predates base_url — an old config must not break link printing.
+$baseUrl = rtrim((string) ($cfg['base_url'] ?? 'https://meenow.de'), '/');
+$tokenLink = fn(string $token): string => $baseUrl . '/?join=' . $token;
 
 switch ($cmd) {
     case 'create':

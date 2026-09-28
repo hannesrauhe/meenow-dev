@@ -24,6 +24,12 @@ return [
         'key_file' => __DIR__ . '/vapid.json',
     ],
 
+    // Public origin of THIS deployment, used when the operator CLI prints
+    // invite links (scripts/groups.php invite). The app itself never needs it
+    // — it builds links from its own location. Set per instance:
+    //   prod: https://meenow.de   dev: https://dev.meenow.de
+    // 'base_url' => 'https://meenow.de',
+
     // Secret in the cron URL: https://meenow.de/cron?action=tick&key=...
     // Generate: php -r 'echo bin2hex(random_bytes(32)), PHP_EOL;'
     'cron_key' => '',
