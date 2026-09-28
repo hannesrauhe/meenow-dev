@@ -59,7 +59,14 @@ return function (string $path): void {
         && $method === 'GET') {
         groups_show($pdo, $m[1], $_GET['account'] ?? '');
     }
-    if (preg_match('#^/groups/([a-z0-9][a-z0-9-]{0,63})/(join|leave|remove|unban|announce)$#', $path, $m) === 1
+    if (preg_match('#^/groups/([a-z0-9][a-z0-9-]{0,63})/announce$#', $path, $m) === 1
+        && $method === 'POST') {
+        // No body to parse: announce takes no caller identity — it re-pushes the
+        // group's newest event to whoever is subscribed, whoever asks. Parsing a
+        // body here would 400 every bodyless POST.
+        groups_announce($pdo, $m[1]);
+    }
+    if (preg_match('#^/groups/([a-z0-9][a-z0-9-]{0,63})/(join|leave|remove|unban)$#', $path, $m) === 1
         && $method === 'POST') {
         $body = meenow_json_input();
         $group = $m[1];
@@ -82,9 +89,6 @@ return function (string $path): void {
                 }
                 if ($m[2] === 'remove') groups_remove($pdo, $group, $account, $actor);
                 groups_unban($pdo, $group, $account, $actor);
-                break;
-            case 'announce':
-                groups_announce($pdo, $group);
                 break;
             default: // 'join'
                 groups_join($pdo, $group, $account, $body['acct'] ?? null,
@@ -537,9 +541,9 @@ function groups_events(PDO $pdo, mixed $accountRaw, mixed $sinceRaw): void
               AND EXISTS (SELECT 1 FROM group_members m
                           WHERE m.group_id = e.group_id AND m.account = ?))
              OR (e.kind = 'remove' AND (
-                    e.account = ?
-                    OR (e.actor <> ? AND EXISTS (SELECT 1 FROM group_members m
-                                                 WHERE m.group_id = e.group_id AND m.account = ?))))
+                    e.account = ? OR e.actor = ?
+                    OR EXISTS (SELECT 1 FROM group_members m
+                               WHERE m.group_id = e.group_id AND m.account = ?)))
          )
          ORDER BY e.id ASC LIMIT 50"
     );
@@ -614,22 +618,23 @@ function groups_verify_account(string $account, string $bearer, string $acct): b
 // Push fan-out
 // ---------------------------------------------------------------------------
 
-// Who must hear about an event. The actor never does (they caused it) and a
-// join is not sent to the joiner. A removal DOES go to its subject: they are no
-// longer in group_members, so the membership query below would otherwise never
-// reach them.
+// Who must hear about an event. A join is not sent to the joiner. A removal
+// goes to everyone still in the roster, to its subject (no longer a member, so
+// the roster query cannot reach them) AND to its actor: the admin's own device
+// must sever the follow too, and the server cannot do that part — only their
+// device holds their token. Excluding the actor here would silently leave the
+// admin following the person they just kicked, on every device they own. The
+// service worker stays quiet about a self-caused removal (actor === me); this
+// list is about doing the work, not about notifying.
 function groups_event_recipients(PDO $pdo, array $event): array
 {
     $st = $pdo->prepare('SELECT account FROM group_members WHERE group_id = ?');
     $st->execute([$event['group_id']]);
     $members = $st->fetchAll(PDO::FETCH_COLUMN);
 
-    $recipients = array_values(array_diff(
-        $members,
-        array_filter([$event['actor']]),
-        $event['kind'] === 'remove' ? [] : [$event['account']]
-    ));
-    if ($event['kind'] === 'remove') $recipients[] = $event['account'];
+    $recipients = $event['kind'] === 'remove'
+        ? array_merge($members, [$event['account'], $event['actor']])
+        : array_diff($members, [$event['account']]);
 
     return array_values(array_unique(array_filter($recipients)));
 }

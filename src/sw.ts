@@ -248,8 +248,12 @@ async function handleGroupEvent(e: PushGroupEvent): Promise<void> {
   const me = auth ? `${auth.instance}:${auth.accountId}` : '';
 
   // The subject of a removal is told about it; nobody else's notification should
-  // read like it happened to them.
+  // read like it happened to them. A removal the admin's own device caused is
+  // also quiet — they just tapped Remove, and a push saying "you removed bob" is
+  // noise. The work below still runs: this device has to sever the follow too,
+  // and it is the only thing holding the admin's token.
   const removedMe = e.kind === 'remove' && e.account === me;
+  const causedByMe = e.kind === 'remove' && e.actor === me;
   const body = e.kind === 'join'
     ? `${shortHandle(e.acct)} joined ${e.name}`
     : removedMe
@@ -258,16 +262,18 @@ async function handleGroupEvent(e: PushGroupEvent): Promise<void> {
 
   // Tagged per event so a re-announce of the same event replaces the existing
   // notification instead of stacking a second copy of it.
-  await self.registration.showNotification('meenow', {
-    body,
-    icon: ICON,
-    badge: BADGE,
-    tag: `meenow-group-${e.id}`,
-    data: { action: 'circle' },
-  });
-  // A visible notification resets the iOS silent-push strike count; not doing
-  // this would let group pushes starve the daily reminder's budget.
-  await resetSilentCount();
+  if (!causedByMe) {
+    await self.registration.showNotification('meenow', {
+      body,
+      icon: ICON,
+      badge: BADGE,
+      tag: `meenow-group-${e.id}`,
+      data: { action: 'circle' },
+    });
+    // A visible notification resets the iOS silent-push strike count; not doing
+    // this would let group pushes starve the daily reminder's budget.
+    await resetSilentCount();
+  }
 
   if (!auth) return;
   // Already handled (push + catch-up can both deliver one event) — do nothing.
