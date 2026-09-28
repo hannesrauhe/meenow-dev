@@ -1,21 +1,26 @@
-// Group-join screen: the target of a group invite deep link (?group=<id>).
-// Lists the group's members and offers one-tap "follow all" — the bootstrap
-// that turns a fresh account into a follower circle. Joining records the
-// membership on meenow's backend (so the user appears in the roster for the
-// next joiner); the circle itself then lives on the instances. Members are
-// locked accounts, so the follows arrive in their Circle inbox as one-tap
-// accepts.
+// Group-join screen: the target of a group invite deep link (?join=<token>).
+// Redeems the token to learn which group it points at, lists the members, and
+// offers one-tap "follow all" — the bootstrap that turns a fresh account into a
+// follower circle. Joining records the membership on meenow's backend (so the
+// user appears in the roster for the next joiner) and notifies the other members,
+// whose devices then approve the join automatically. The circle itself lives on
+// the instances.
+//
+// The token, never a group slug, is what the link carries — so this screen cannot
+// even name the group until the token is redeemed, which is exactly the point: a
+// shared link grants access without making the group discoverable.
 import { CHEVRON_LEFT_ICON } from '../icons';
 import type { AuthState } from '../api/auth';
 import {
-  fetchGroup, joinGroup, followAllGroupMembers, accountKey,
-  type GroupMember,
+  redeemInvite, joinGroup, followAllGroupMembers, accountKey,
+  GroupApiError, type GroupMember, type RedeemedInvite,
 } from '../api/groups';
+import { approveGroupMembers } from '../api/groupAuto';
 import { fetchRelationships, resolveHandle, type Relationship } from '../api/social';
 import { makeConnectButton } from '../components/connectButton';
 import { makeAccountRow } from '../components/accountRow';
 
-export function renderGroupJoin(auth: AuthState, groupId: string, onDone: () => void): HTMLElement {
+export function renderGroupJoin(auth: AuthState, token: string, onDone: () => void): HTMLElement {
   const root = document.createElement('div');
   root.id = 'screen-group';
   root.className = 'min-h-dvh flex flex-col bg-cream';
@@ -42,14 +47,14 @@ export function renderGroupJoin(auth: AuthState, groupId: string, onDone: () => 
   content.className = 'flex-1';
   root.appendChild(content);
 
-  loadGroup(content, auth, groupId, onDone);
+  loadGroup(content, auth, token, onDone);
   return root;
 }
 
 async function loadGroup(
   container: HTMLElement,
   auth: AuthState,
-  groupId: string,
+  token: string,
   onDone: () => void,
 ): Promise<void> {
   container.innerHTML = `
@@ -59,29 +64,45 @@ async function loadGroup(
     </div>
   `;
 
-  let group: Awaited<ReturnType<typeof fetchGroup>>;
+  let invite: RedeemedInvite | null = null;
+  let failure = '';
+  let err: unknown = null;
   try {
-    group = await fetchGroup(auth, groupId);
-  } catch {
-    group = null;
+    invite = await redeemInvite(auth, token);
+  } catch (e) {
+    err = e;
+    failure = e instanceof GroupApiError ? e.code : 'unknown';
   }
   if (!container.isConnected) return;
 
-  if (!group) {
-    renderMessage(container, 'This group link is no longer valid.', onDone,
-      () => loadGroup(container, auth, groupId, onDone));
+  // Each dead-end gets its own wording: "ask for a fresh link" is only honest for
+  // an expired one, and a blocked person must never be told the link is broken —
+  // that invites them to go bother the person who shared it.
+  if (!invite) {
+    const message = failure === 'invite_expired' || failure === 'invite_exhausted'
+      ? 'This invite has run out. Ask someone in the group for a fresh link.'
+      : failure === 'banned'
+        ? 'You can’t join this group.'
+        : err instanceof GroupApiError && err.debug
+          ? err.debug
+          : 'This group link is no longer valid.';
+    // Only a network failure is worth retrying; a dead token stays dead.
+    const retryable = failure === 'unknown';
+    renderMessage(container, message, onDone, retryable
+      ? () => loadGroup(container, auth, token, onDone) : undefined);
     return;
   }
 
-  const isMember = group.members.some((m) => m.account === accountKey(auth));
-  const others = group.members.filter((m) => m.account !== accountKey(auth));
+  const groupId = invite.id;
+  const isMember = invite.members.some((m) => m.account === accountKey(auth));
+  const others = invite.members.filter((m) => m.account !== accountKey(auth));
   const memberIds = await resolveIds(auth, others);
   if (!container.isConnected) return;
 
   const rels = await fetchRelationships(auth, [...memberIds.values()].filter(Boolean));
   if (!container.isConnected) return;
 
-  renderGroup(container, auth, groupId, group.name, isMember, others, memberIds, rels, onDone);
+  renderGroup(container, auth, groupId, token, invite.name, isMember, others, memberIds, rels, onDone);
 }
 
 // Map member account -> followable id on our instance (local ids directly,
@@ -109,6 +130,7 @@ function renderGroup(
   container: HTMLElement,
   auth: AuthState,
   groupId: string,
+  token: string,
   name: string,
   isMember: boolean,
   members: GroupMember[],
@@ -149,7 +171,7 @@ function renderGroup(
     followAll.className = 'btn-primary my-2';
     followAll.textContent = `Follow all ${members.length}`;
     followAll.addEventListener('click', () => {
-      void runFollowAll(followAll, status, auth, groupId, members, ids, list);
+      void runFollowAll(followAll, status, auth, groupId, token, members, ids, list);
     });
     const wrap = document.createElement('div');
     wrap.className = 'flex justify-center pb-4';
@@ -162,7 +184,7 @@ function renderGroup(
     joinBtn.className = 'btn-primary my-2';
     joinBtn.textContent = 'Join group';
     joinBtn.addEventListener('click', () => {
-      void runJoinOnly(joinBtn, status, auth, groupId);
+      void runJoinOnly(joinBtn, status, auth, groupId, token);
     });
     const wrap = document.createElement('div');
     wrap.className = 'flex justify-center pb-4';
@@ -215,14 +237,16 @@ async function runJoinOnly(
   status: HTMLElement,
   auth: AuthState,
   groupId: string,
+  token: string,
 ): Promise<void> {
   btn.disabled = true;
   btn.textContent = 'Joining…';
   try {
-    await joinGroup(auth, groupId);
-  } catch {
+    await joinGroup(auth, groupId, token);
+  } catch (err) {
     btn.disabled = false;
     btn.textContent = 'Try again';
+    status.textContent = joinFailure(err);
     return;
   }
   if (!btn.isConnected) return;
@@ -230,11 +254,34 @@ async function runJoinOnly(
   status.textContent = 'You’re in — the first member. Share the link from your circle to grow it.';
 }
 
+// The join can fail for reasons the generic "try again" would hide: a link that
+// ran out, or a block. Both are terminal, so say so instead of inviting taps.
+function joinFailure(err: unknown): string {
+  if (err instanceof GroupApiError) {
+    if (err.code === 'banned') return 'You can’t join this group.';
+    if (err.code === 'invite_expired' || err.code === 'invite_exhausted') {
+      return 'This invite has run out. Ask for a fresh link.';
+    }
+    if (err.debug) return err.debug; // server debug mode: show the real error
+  }
+  return '';
+}
+
+// Short ladder for the joiner's own inbox: the members' back-follows arrive on
+// their own schedule (their devices act on the push we just triggered), so one
+// immediate pass would usually find nothing. Cheap — one inbox read each.
+const MEMBER_APPROVE_DELAYS_MS = [3_000, 12_000, 30_000];
+
+function wait(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function runFollowAll(
   btn: HTMLButtonElement,
   status: HTMLElement,
   auth: AuthState,
   groupId: string,
+  token: string,
   members: GroupMember[],
   ids: Map<string, string>,
   list: HTMLElement,
@@ -242,10 +289,20 @@ async function runFollowAll(
   btn.disabled = true;
   btn.textContent = 'Joining…';
   // Membership first: the joiner becomes part of the roster for whoever
-  // follows the same link next. It is idempotent, so a retry is safe.
+  // follows the same link next, and it is what notifies the other members so
+  // their devices start approving. It is idempotent, so a retry is safe.
   try {
-    await joinGroup(auth, groupId);
-  } catch { /* still follow — membership self-heals on the next join attempt */ }
+    await joinGroup(auth, groupId, token);
+  } catch (err) {
+    const why = joinFailure(err);
+    if (why) {
+      btn.disabled = false;
+      btn.textContent = 'Try again';
+      status.textContent = why;
+      return;
+    }
+    // Still follow — membership self-heals on the next join attempt.
+  }
   btn.textContent = 'Following…';
   const res = await followAllGroupMembers(auth, members, (done, t) => {
     status.textContent = `Following ${done} of ${t}…`;
@@ -261,6 +318,28 @@ async function runFollowAll(
   if (res.skipped) parts.push(`${res.skipped} already connected`);
   if (res.failed) parts.push(`${res.failed} unavailable`);
   status.textContent = parts.length ? `${parts.join(' · ')}. They’ll see your photos once they approve.` : '';
+
+  // The symmetric half. Every member is a locked account that auto-approves us,
+  // and each one follows back — which lands as a follow request in OUR inbox,
+  // where our own lock would hold it forever. Approve them here, or the circle
+  // stays one-way and they see our photos while we never see theirs.
+  //
+  // The ladder ends as soon as a pass finds nothing left to approve after having
+  // approved something — that is the back-follow wave having fully arrived — so a
+  // snappy group costs ~3 s and a slow one still gets the full 45 s.
+  let totalSettled = 0;
+  for (const delay of MEMBER_APPROVE_DELAYS_MS) {
+    await wait(delay);
+    if (!list.isConnected) return; // the screen closed; the Circle inbox still has them
+    const settled = await approveGroupMembers(auth, members);
+    totalSettled += settled;
+    if (settled > 0 && status.isConnected) {
+      status.textContent = `Connected with ${totalSettled} of them.`;
+      const reread = await fetchRelationships(auth, [...ids.values()].filter(Boolean));
+      if (list.isConnected) renderMemberRows(list, auth, members, ids, reread, status);
+    }
+    if (totalSettled > 0 && settled === 0) break;
+  }
 }
 
 function renderMessage(container: HTMLElement, message: string, onDone: () => void, retry?: () => void): void {

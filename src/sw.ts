@@ -9,6 +9,8 @@ import { NavigationRoute, registerRoute } from 'workbox-routing';
 import { getLastTriggerTime, getTodayTrigger } from './timer';
 import { idbGet, idbSet, IDB_KEYS, type StoredAuth } from './idb';
 import { fetchNewEngagement, fetchFriendsPostedCount } from './api/engagement';
+import { applyEventWithRetry, loadBans, lastSeenEventId } from './api/groupEvents';
+import type { GroupEvent, PushGroupEvent } from './api/groups';
 
 declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ revision: string | null; url: string }>;
@@ -232,13 +234,86 @@ async function handleTick(late: boolean): Promise<void> {
   await (notPosted ? showDailyOrSkip(triggerMs, late) : showPostPostedDigest(triggerMs, late));
 }
 
+// A group event, pushed the moment another member's device writes it. Two jobs:
+// tell the human what happened, and do the part only this device can do — the
+// server holds no instance credentials, so approving a newcomer's follow request
+// or severing a removed one has to happen here, with this user's token.
+//
+// The notification and the work are deliberately independent: the message is
+// shown first (it is the user-visible half, and iOS counts silent pushes), then
+// the graph is fixed whether or not that succeeds. A failure here is not lost —
+// the events endpoint replays anything missed on the next app open.
+async function handleGroupEvent(e: PushGroupEvent): Promise<void> {
+  const auth = await idbGet<StoredAuth>(IDB_KEYS.auth);
+  const me = auth ? `${auth.instance}:${auth.accountId}` : '';
+
+  // The subject of a removal is told about it; nobody else's notification should
+  // read like it happened to them. A removal the admin's own device caused is
+  // also quiet — they just tapped Remove, and a push saying "you removed bob" is
+  // noise. The work below still runs: this device has to sever the follow too,
+  // and it is the only thing holding the admin's token.
+  const removedMe = e.kind === 'remove' && e.account === me;
+  const causedByMe = e.kind === 'remove' && e.actor === me;
+  const body = e.kind === 'join'
+    ? `${shortHandle(e.acct)} joined ${e.name}`
+    : removedMe
+      ? `You’re no longer part of ${e.name}`
+      : `${shortHandle(e.acct)} was removed from ${e.name}`;
+
+  // Tagged per event so a re-announce of the same event replaces the existing
+  // notification instead of stacking a second copy of it.
+  if (!causedByMe) {
+    await self.registration.showNotification('meenow', {
+      body,
+      icon: ICON,
+      badge: BADGE,
+      tag: `meenow-group-${e.id}`,
+      data: { action: 'circle' },
+    });
+    // A visible notification resets the iOS silent-push strike count; not doing
+    // this would let group pushes starve the daily reminder's budget.
+    await resetSilentCount();
+  }
+
+  if (!auth) return;
+  // Already handled (push + catch-up can both deliver one event) — do nothing.
+  if (e.id <= await lastSeenEventId()) return;
+
+  const bans = await loadBans();
+  // A removal is instant; a join rides the retry ladder, because the joiner's own
+  // follow request is usually still in flight when this push lands.
+  const event: GroupEvent = {
+    id: e.id, group_id: e.group, kind: e.kind,
+    account: e.account, acct: e.acct, actor: e.actor, name: e.name,
+  };
+  await applyEventWithRetry(auth, event, bans);
+}
+
+// "alice@pixelfed.social" -> "alice" — a notification body reads better without
+// the domain, which is noise inside a small community.
+function shortHandle(acct: string): string {
+  return acct.replace(/^@/, '').split('@')[0] || acct;
+}
+
 self.addEventListener('push', event => {
   // json() throws on malformed payloads — swallow and treat as a plain tick so
   // even a corrupt push cannot end silently.
-  let data: { ts?: number; force?: boolean; late?: boolean } = {};
+  let data: { ts?: number; force?: boolean; late?: boolean; group_event?: PushGroupEvent } = {};
   try {
     data = event.data?.json() ?? {};
   } catch { /* malformed payload */ }
+
+  // Group events MUST be branched on before anything else: an unrecognised
+  // payload falls through to handleTick, which would render "b joined the group"
+  // as a "time to post" reminder — wrong message, wrong reason, and the actual
+  // work (approve/sever) would never run.
+  if (data.group_event) {
+    event.waitUntil(
+      handleGroupEvent(data.group_event)
+        .catch(err => console.error('[sw] group event failed', err))
+    );
+    return;
+  }
 
   if (data.force) {
     const forceTriggerMs = getLastTriggerTime().getTime();
@@ -259,9 +334,11 @@ self.addEventListener('push', event => {
 self.addEventListener('notificationclick', event => {
   event.notification.close();
   // The daily reminder carries { action: 'capture' } so a tap opens the capture
-  // screen directly (issue #56); other notifications open the feed.
+  // screen directly (issue #56); a group event carries 'circle', because that is
+  // where a newcomer appears and where a removal is visible. Anything else (and
+  // any future action the app does not know) opens the feed.
   const action = (event.notification.data as { action?: string } | undefined)?.action;
-  const url = action === 'capture' ? '/?action=capture' : '/';
+  const url = action === 'capture' || action === 'circle' ? `/?action=${action}` : '/';
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
       for (const client of clients) {

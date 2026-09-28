@@ -1,7 +1,15 @@
 // OAuth PKCE auth: client registration, login flow, token/accountId storage, and auth state helpers.
-import { clearLockedApplied, clearPendingAdd, clearPendingGroup } from '../state';
+// App-only: localStorage, window, and the OAuth redirect. The service worker must
+// not reach this module — it needs AuthState, which lives in authState.ts precisely
+// so the SW can have the type without this file's DOM dependencies.
+import { clearLockedApplied, clearPendingAdd, clearPendingJoin } from '../state';
 import { apiBase } from '../config';
 import { idbDelete, IDB_KEYS } from '../idb';
+import type { AuthState } from './authState';
+
+// Re-exported so every existing `import type { AuthState } from './auth'` keeps
+// working. New SW-reachable modules import it from './authState' directly.
+export type { AuthState } from './authState';
 
 const PREFIX = 'meenow:auth:';
 
@@ -10,12 +18,6 @@ const PREFIX = 'meenow:auth:';
 // request authorize/reject. `read write` alone yields a 403 on all of them, so
 // the `follow` scope must be requested explicitly and saved at app registration.
 const OAUTH_SCOPES = 'read write follow';
-
-export interface AuthState {
-  instance: string;
-  accessToken: string;
-  accountId: string;
-}
 
 function key(instance: string, field: string): string {
   return `${PREFIX}${instance}:${field}`;
@@ -160,7 +162,7 @@ export function clearAuth(): void {
   localStorage.removeItem(`${PREFIX}pending-instance`);
   localStorage.removeItem(`${PREFIX}verifier`);
   clearPendingAdd();
-  clearPendingGroup();
+  clearPendingJoin();
   localStorage.removeItem('meenow:pwa-subbed');
   // Drop the SW's mirrored auth, engagement-digest and daily-reminder state.
   void idbDelete(IDB_KEYS.auth);

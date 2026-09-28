@@ -5,8 +5,12 @@ cd "$(dirname "$0")/.."   # server/
 
 NET=meenow-test-net
 DB=meenow-test-db
+WEB=meenow-test-web
+# Hard cap: the proxy checks hit the live home instance, so a stalled upstream
+# could otherwise hang the run. Override with TEST_TIMEOUT=<seconds>.
+TEST_TIMEOUT=${TEST_TIMEOUT:-600}
 cleanup() {
-  docker rm -f "$DB" >/dev/null 2>&1 || true
+  docker rm -f "$DB" "$WEB" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
   # Remove root-owned artifacts the container left in the mounted dir.
   docker run --rm -v "$PWD:/app" alpine sh -c \
@@ -25,4 +29,8 @@ echo "Waiting for MariaDB..."
 docker run --rm --network "$NET" meenow-test sh -c \
   'for i in $(seq 1 60); do php -r "try { new PDO(\"mysql:host='"$DB"';dbname=meenow\", \"meenow\", \"meenowpw\"); exit(0); } catch (Throwable \$e) { exit(1); }" && exit 0; sleep 2; done; exit 1'
 
-docker run --rm --network "$NET" -e DB_HOST="$DB" -v "$PWD:/app" -w /app meenow-test sh scripts/test-entrypoint.sh
+# Named + timeout'd: if the suite stalls (a live proxy check hanging), timeout
+# kills the run and cleanup removes the container. --rm alone would leak it.
+timeout --signal=KILL "$TEST_TIMEOUT" \
+  docker run --rm --name "$WEB" --network "$NET" -e DB_HOST="$DB" -v "$PWD:/app" -w /app \
+  meenow-test sh scripts/test-entrypoint.sh

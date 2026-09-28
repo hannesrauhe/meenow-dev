@@ -24,6 +24,12 @@ return [
         'key_file' => __DIR__ . '/vapid.json',
     ],
 
+    // Public origin of THIS deployment, used when the operator CLI prints
+    // invite links (scripts/groups.php invite). The app itself never needs it
+    // — it builds links from its own location. Set per instance:
+    //   prod: https://meenow.de   dev: https://dev.meenow.de
+    // 'base_url' => 'https://meenow.de',
+
     // Secret in the cron URL: https://meenow.de/cron?action=tick&key=...
     // Generate: php -r 'echo bin2hex(random_bytes(32)), PHP_EOL;'
     'cron_key' => '',
@@ -40,4 +46,27 @@ return [
         'window_s' => 60,
         'max' => 300,
     ],
+
+    // --- Bootstrap-group invites (see src/groups.php) ------------------------
+    // Invite links carry a random 128-bit token instead of the group slug, so a
+    // link is a capability with a shelf life rather than a guessable URL. These
+    // two values are deliberately global: the whole point is that a forwarded
+    // link stops working on its own, and per-link knobs would only invite links
+    // that never expire.
+    'invite_ttl_s' => 14400,   // 4 hours
+    'invite_max_uses' => 5,    // distinct accounts, not joins
+
+    // Verify a joiner really is the "<instance>:<accountId>" they claim, by
+    // calling verify_credentials on the instance with the caller's own Bearer
+    // token. Worth keeping on: group membership is otherwise self-asserted, and
+    // both auto-approve and the admin check act on the STORED account string —
+    // without this, anyone could plant a member row for everyone to follow, or
+    // claim to be the admin and remove people. Turn off only where no real
+    // instance is reachable (the Docker test suite runs on dummy tokens).
+    'verify_group_accounts' => true,
+
+    // Echo real errors (class, message, file:line) in API responses so the app
+    // shows them on screen — no server log needed. NEVER on production: it
+    // leaks paths and query internals.
+    // 'debug' => true,
 ];

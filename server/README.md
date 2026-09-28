@@ -132,8 +132,10 @@ php scripts/groups.php delete crew     # group + all members
 
 Seeding the founding members with `add` is what makes a group useful before
 anyone has joined it; everyone after that arrives through the app. Invite links
-are `https://meenow.de/?group=<id>` — no expiry, no single-use, the link only
-carries the id and joining still requires the member to approve the follow.
+(`php scripts/groups.php invite crew`) are `https://<base_url>/?join=<token>`
+— the origin comes from the `base_url` config key, the token is a random
+128-bit capability that expires (see `invite_ttl_s` / `invite_max_uses` in
+`config.example.php`).
 
 ## Testing
 
