@@ -6,7 +6,7 @@ import { CHEVRON_LEFT_ICON, SLEEPING_CAT } from '../icons';
 import type { AuthState } from '../api/auth';
 import {
   fetchMyAccount, fetchFollowRequests, fetchConnections, fetchRelationships,
-  setAccountPrivacy, acceptAndBackFollow, rejectFollowRequest,
+  setAccountPrivacy, acceptAndBackFollow, rejectFollowRequest, removeFollower,
   invalidatePendingRequestCache,
   type Connection, type Relationship,
 } from '../api/social';
@@ -119,7 +119,7 @@ async function loadCircle(
   if (followsYou.length > 0) {
     container.appendChild(makeFollowsYouSection(auth, followsYou, rels, onOpenPeer, () => loadCircle(container, auth, onOpenPeer)));
   }
-  container.appendChild(makeCircleSection(following, followsYou.length, rels, onOpenPeer));
+  container.appendChild(makeCircleSection(auth, following, followsYou.length, rels, onOpenPeer, () => loadCircle(container, auth, onOpenPeer)));
   container.appendChild(makeLockRow(auth, lockedNow));
 }
 
@@ -367,6 +367,38 @@ function makeFollowsYouSection(
     row.addEventListener('click', () => onOpenPeer(c));
     // The pill's own tap must not also drill into the peer screen via the row.
     actions.addEventListener('click', e => e.stopPropagation());
+
+    // These people follow you, so they see your daily photos until removed —
+    // the only remedy for a follower you never accepted (pre-lock follows,
+    // failed back-follows, remote auto-accepts). Two-tap like every disconnect.
+    const remove = document.createElement('button');
+    remove.className = 'text-xs rounded-full px-3 py-1.5 border border-ink/15 text-ink/50';
+    remove.textContent = 'Remove';
+    let confirming = false;
+    remove.addEventListener('click', () => {
+      if (!confirming) {
+        confirming = true;
+        remove.textContent = 'Sure?';
+        window.setTimeout(() => {
+          if (!confirming || !remove.isConnected) return;
+          confirming = false;
+          remove.textContent = 'Remove';
+        }, 3000);
+        return;
+      }
+      confirming = false;
+      remove.disabled = true;
+      void removeFollower(auth, c.id).then(() => {
+        if (reloadScheduled) return;
+        reloadScheduled = true;
+        window.setTimeout(reload, 600);
+      }).catch(() => {
+        remove.disabled = false;
+        remove.textContent = 'Try again';
+      });
+    });
+    actions.appendChild(remove);
+
     actions.appendChild(makeConnectButton(auth, c.id, rels.get(c.id), rel => {
       if (rel.following && rel.followedBy && !reloadScheduled) {
         reloadScheduled = true;
@@ -380,10 +412,12 @@ function makeFollowsYouSection(
 }
 
 function makeCircleSection(
+  auth: AuthState,
   following: Connection[],
   followsYouCount: number,
   rels: Map<string, Relationship>,
   onOpenPeer: (peer: Connection) => void,
+  reload: () => void,
 ): HTMLElement {
   const section = document.createElement('div');
 
@@ -402,25 +436,38 @@ function makeCircleSection(
   }
 
   section.appendChild(makeSectionHeading(`Your circle · ${mutuals.length}`));
-  for (const c of mutuals) section.appendChild(makePeerRow(c, onOpenPeer, 'mutual'));
+  for (const c of mutuals) section.appendChild(makePeerRow(auth, c, rels.get(c.id), onOpenPeer, reload));
 
   if (oneWay.length > 0) {
     section.appendChild(makeSectionHeading('Waiting for them'));
-    for (const c of oneWay) section.appendChild(makePeerRow(c, onOpenPeer, 'oneway'));
+    for (const c of oneWay) section.appendChild(makePeerRow(auth, c, rels.get(c.id), onOpenPeer, reload));
   }
 
   return section;
 }
 
-function makePeerRow(c: Connection, onOpenPeer: (peer: Connection) => void, kind: 'mutual' | 'oneway'): HTMLElement {
+function makePeerRow(
+  auth: AuthState,
+  c: Connection,
+  rel: Relationship | undefined,
+  onOpenPeer: (peer: Connection) => void,
+  reload: () => void,
+): HTMLElement {
   const { row, actions } = makeAccountRow({ displayName: c.displayName, handle: c.acct, avatarUrl: c.avatarUrl });
   row.classList.add('cursor-pointer');
   row.addEventListener('click', () => onOpenPeer(c));
+  // The pill's own tap must not also drill into the peer screen via the row.
+  actions.addEventListener('click', e => e.stopPropagation());
 
-  const tag = document.createElement('span');
-  tag.className = 'text-xs text-ink/30';
-  tag.textContent = kind === 'mutual' ? 'View connections ›' : 'Pending';
-  actions.appendChild(tag);
+  // The pill is also the disconnect affordance (two-tap), which is the only way
+  // to leave a connection — the row itself only drills in. Any state change
+  // moves the row between groups (or out of the list), so rebuild once.
+  let reloadScheduled = false;
+  actions.appendChild(makeConnectButton(auth, c.id, rel, () => {
+    if (reloadScheduled) return;
+    reloadScheduled = true;
+    window.setTimeout(reload, 900);
+  }));
 
   return row;
 }

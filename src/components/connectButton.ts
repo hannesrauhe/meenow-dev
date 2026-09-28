@@ -3,7 +3,7 @@
 // connect-landing screens. The state→label mapping is the single source of truth
 // for how a connection is presented across the app.
 import type { AuthState } from '../api/auth';
-import { connectTo, unfollow, type Relationship } from '../api/social';
+import { connectTo, unfollow, removeFollower, fetchRelationships, type Relationship } from '../api/social';
 
 const PILL = 'text-xs rounded-full px-3 py-1.5 border transition-colors';
 const ACTIVE = `${PILL} text-gold border-gold/40`;
@@ -33,11 +33,9 @@ export function makeConnectButton(
       btn.className = DONE;
     } else if (r?.following) {
       btn.textContent = 'Waiting for them';
-      btn.disabled = true;
       btn.className = MUTED;
     } else if (r?.requested) {
       btn.textContent = 'Requested';
-      btn.disabled = true;
       btn.className = MUTED;
     } else if (r?.followedBy) {
       btn.textContent = 'Connect back';
@@ -63,11 +61,32 @@ export function makeConnectButton(
     }
   };
 
+  // Full severance: unfollow them AND (when they follow us) drop them from our
+  // followers. In a followers-only app the removal is the point — unfollowing
+  // alone would leave them reading your daily photos. Partial success still
+  // counts (the refreshed relationship shows the truth); an instance without
+  // the remove endpoint degrades to a plain unfollow instead of a dead button.
+  const disconnect = async (removeThem: boolean): Promise<Relationship> => {
+    const [un, rm] = await Promise.allSettled([
+      unfollow(auth, accountId),
+      removeThem ? removeFollower(auth, accountId) : Promise.resolve(),
+    ]);
+    if (un.status === 'rejected' && (!removeThem || rm.status === 'rejected')) {
+      throw un.reason as Error;
+    }
+    const rel = (await fetchRelationships(auth, [accountId])).get(accountId);
+    if (rel) return rel;
+    throw new Error('Could not refresh relationship');
+  };
+
   btn.addEventListener('click', () => {
     const r = state;
     if (r?.blocking || r?.blockedBy) return;
-    if (r?.following && r?.followedBy) {
-      // Two-tap disconnect: avoids a modal while still confirming.
+    // Any follow we hold — mutual or one-way — is undone by a two-tap
+    // "Disconnect?". There is deliberately no plain unfollow: in a
+    // followers-only app the meaningful severance is also removing them from
+    // your followers, so the action always severs both directions that exist.
+    if (r?.following) {
       if (!confirming) {
         confirming = true;
         btn.textContent = 'Disconnect?';
@@ -75,10 +94,22 @@ export function makeConnectButton(
         window.setTimeout(() => { if (confirming) apply(); }, 3000);
         return;
       }
+      void run(() => disconnect(r.followedBy));
+      return;
+    }
+    // Pending request: two-tap cancel (Pixelfed's unfollow endpoint also
+    // deletes a pending FollowRequest; there is no follower to remove yet).
+    if (r?.requested) {
+      if (!confirming) {
+        confirming = true;
+        btn.textContent = 'Cancel?';
+        btn.className = ACTIVE;
+        window.setTimeout(() => { if (confirming) apply(); }, 3000);
+        return;
+      }
       void run(() => unfollow(auth, accountId));
       return;
     }
-    if (r?.following || r?.requested) return; // pending states are no-ops
     void run(() => connectTo(auth, accountId));
   });
 

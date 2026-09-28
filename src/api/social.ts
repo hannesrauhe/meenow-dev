@@ -150,6 +150,17 @@ export async function unfollow(auth: AuthState, accountId: string): Promise<Rela
   return parseRelationship(auth, res, accountId);
 }
 
+// Drop an account from your followers — the only action that stops them seeing
+// your followers-only posts (unfollowing them does not: they still follow you).
+// Mastodon-compatible, needs the `follow` scope.
+export async function removeFollower(auth: AuthState, accountId: string): Promise<void> {
+  const res = await fetch(`${apiBase(auth.instance)}/api/v1/accounts/${accountId}/remove_from_followers`, {
+    method: 'POST',
+    headers: authHeaders(auth),
+  });
+  if (!res.ok) throw new Error(`Remove follower failed (${res.status})`);
+}
+
 export async function fetchRelationships(auth: AuthState, ids: string[]): Promise<Map<string, Relationship>> {
   const map = new Map<string, Relationship>();
   const unique = [...new Set(ids)].filter(Boolean);
