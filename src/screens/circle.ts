@@ -11,6 +11,7 @@ import {
   type Connection, type Relationship,
 } from '../api/social';
 import { isLockedApplied, setLockedApplied } from '../state';
+import { profileUrl } from '../config';
 import { makeAccountRow } from '../components/accountRow';
 import { makeConnectButton } from '../components/connectButton';
 import { fetchMyGroups, fetchGroup, leaveGroup, createInvite, type Group } from '../api/groups';
@@ -355,7 +356,7 @@ function makeRequestsSection(auth: AuthState, requests: Connection[], reload: ()
   };
 
   for (const req of requests) {
-    const { row, actions } = makeAccountRow({ displayName: req.displayName, handle: req.acct, avatarUrl: req.avatarUrl });
+    const { row, actions } = makeAccountRow({ displayName: req.displayName, handle: req.acct, avatarUrl: req.avatarUrl, profileUrl: profileUrl(auth.instance, req.acct) });
 
     const accept = document.createElement('button');
     accept.className = 'text-xs rounded-full px-3 py-1.5 bg-ink text-cream font-medium';
@@ -417,7 +418,7 @@ function makeFollowsYouSection(
   let reloadScheduled = false;
 
   for (const c of followsYou) {
-    const { row, actions } = makeAccountRow({ displayName: c.displayName, handle: c.acct, avatarUrl: c.avatarUrl });
+    const { row, actions } = makeAccountRow({ displayName: c.displayName, handle: c.acct, avatarUrl: c.avatarUrl, profileUrl: profileUrl(auth.instance, c.acct) });
 
     // These people follow you, so they see your daily photos until removed —
     // the only remedy for a follower you never accepted (pre-lock follows,
@@ -505,7 +506,7 @@ function makePeerRow(
   rel: Relationship | undefined,
   reload: () => void,
 ): HTMLElement {
-  const { row, actions } = makeAccountRow({ displayName: c.displayName, handle: c.acct, avatarUrl: c.avatarUrl });
+  const { row, actions } = makeAccountRow({ displayName: c.displayName, handle: c.acct, avatarUrl: c.avatarUrl, profileUrl: profileUrl(auth.instance, c.acct) });
 
   // The pill is also the disconnect affordance (two-tap), the only way to leave
   // a connection. Any state change moves the row between groups (or out of the

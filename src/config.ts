@@ -27,6 +27,13 @@ export function apiBase(instance: string): string {
   return `https://${instance}`;
 }
 
+// Profile link on the user's own instance: the /@user@domain webfinger route
+// renders remote accounts as their local shadow profile, so a tap never lands
+// on the foreign instance. Navigation, not an API call — no proxy needed.
+export function profileUrl(instance: string, acct: string): string {
+  return `https://${instance}/@${acct.replace(/^@/, '')}`;
+}
+
 // Same-origin endpoints served by the PHP backend.
 export const GROUPS_URL = '/groups';
 export const PUSH_SUBSCRIBE_URL = '/push/subscribe';

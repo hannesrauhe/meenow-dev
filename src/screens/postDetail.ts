@@ -2,6 +2,7 @@
 import { CHEVRON_LEFT_ICON, TRASH_ICON } from '../icons';
 import type { AuthState } from '../api/auth';
 import { fetchPostContext, postReply, type FeedPost, type MastodonReply } from '../api/pixelfed';
+import { profileUrl } from '../config';
 import { avatarSrc } from '../components/accountRow';
 import { formatRelativeTime } from '../timer';
 
@@ -50,7 +51,8 @@ export function renderPostDetail(
 
   // Author row
   const authorRow = document.createElement('div');
-  authorRow.className = 'flex items-center gap-3 px-4 py-3';
+  authorRow.className = 'flex items-center gap-3 px-4 py-3 cursor-pointer';
+  authorRow.addEventListener('click', () => window.open(profileUrl(auth.instance, post.account.acct), '_blank', 'noopener'));
 
   const avatar = document.createElement('img');
   avatar.src = avatarSrc(post.account.avatarUrl);

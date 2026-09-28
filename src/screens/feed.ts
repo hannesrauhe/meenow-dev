@@ -4,7 +4,7 @@ import { clearAuth, getAuthState, type AuthState } from '../api/auth';
 import { disableNotifications } from '../notifications';
 import { MAX_POSTS_PER_TRIGGER } from '../state';
 import { fetchMeenowFeed, classifyFeedError, getLastFeedUrl, type FeedErrorKind, type FeedPost } from '../api/pixelfed';
-import { HOME_INSTANCE } from '../config';
+import { HOME_INSTANCE, profileUrl } from '../config';
 import { fetchDailyBonus, type DailyBonus } from '../api/dailyBonus';
 import { fetchXkcdBonus, comicUrl, type XkcdBonus } from '../api/xkcd';
 import { fetchPendingRequestCount } from '../api/social';
@@ -247,7 +247,7 @@ async function loadFeed(container: HTMLElement, auth: AuthState, postCount: numb
     `;
   } else {
     const unblurred = postCount > 0;
-    posts.forEach(post => container.appendChild(makePostCard(post, unblurred, onOpenPost)));
+    posts.forEach(post => container.appendChild(makePostCard(post, unblurred, auth.instance, onOpenPost)));
   }
 
   // Bonus cards (xkcd, then Wikimedia picture of the day) fill the
@@ -389,13 +389,14 @@ function makeXkcdCard(bonus: XkcdBonus): HTMLElement {
   return card;
 }
 
-function makePostCard(post: FeedPost, unblurred: boolean, onOpenPost: (post: FeedPost) => void): HTMLElement {
+function makePostCard(post: FeedPost, unblurred: boolean, instance: string, onOpenPost: (post: FeedPost) => void): HTMLElement {
   const card = document.createElement('article');
   card.className = 'border-b border-ink/8';
 
   // Header
   const header = document.createElement('div');
-  header.className = 'flex items-center gap-3 px-4 py-3';
+  header.className = 'flex items-center gap-3 px-4 py-3 cursor-pointer';
+  header.addEventListener('click', () => window.open(profileUrl(instance, post.account.acct), '_blank', 'noopener'));
 
   const avatar = document.createElement('img');
   avatar.src = avatarSrc(post.account.avatarUrl);
