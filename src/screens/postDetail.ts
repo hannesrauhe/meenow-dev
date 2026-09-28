@@ -2,6 +2,7 @@
 import { CHEVRON_LEFT_ICON, TRASH_ICON } from '../icons';
 import type { AuthState } from '../api/auth';
 import { fetchPostContext, postReply, type FeedPost, type MastodonReply } from '../api/pixelfed';
+import { avatarSrc } from '../components/accountRow';
 import { formatRelativeTime } from '../timer';
 
 export function renderPostDetail(
@@ -9,7 +10,6 @@ export function renderPostDetail(
   auth: AuthState,
   onBack: () => void,
   onDelete?: () => Promise<void>,
-  onOpenPeer?: (account: FeedPost['account']) => void,
 ): HTMLElement {
   const root = document.createElement('div');
   root.id = 'screen-post-detail';
@@ -53,7 +53,7 @@ export function renderPostDetail(
   authorRow.className = 'flex items-center gap-3 px-4 py-3';
 
   const avatar = document.createElement('img');
-  avatar.src = post.account.avatarUrl;
+  avatar.src = avatarSrc(post.account.avatarUrl);
   avatar.className = 'w-9 h-9 rounded-full object-cover bg-gold-light shrink-0';
   avatar.alt = '';
   authorRow.appendChild(avatar);
@@ -72,10 +72,6 @@ export function renderPostDetail(
   info.appendChild(metaEl);
 
   authorRow.appendChild(info);
-  if (onOpenPeer && post.account.id !== auth.accountId) {
-    authorRow.classList.add('cursor-pointer');
-    authorRow.addEventListener('click', () => onOpenPeer(post.account));
-  }
   scrollArea.appendChild(authorRow);
 
   scrollArea.appendChild(makePhotoSwiper(post));
@@ -476,7 +472,7 @@ function makeReplyRow(reply: MastodonReply): HTMLElement {
   row.className = 'flex gap-3 py-3 border-b border-ink/8';
 
   const avatar = document.createElement('img');
-  avatar.src = reply.account.avatar;
+  avatar.src = avatarSrc(reply.account.avatar);
   avatar.className = 'w-8 h-8 rounded-full object-cover bg-gold-light shrink-0 mt-0.5';
   avatar.alt = '';
   row.appendChild(avatar);

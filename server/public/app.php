@@ -22,9 +22,6 @@ if (!is_file($appRoot . '/src/bootstrap.php')) {
     exit("cannot locate app root (src/bootstrap.php) — set MEENOW_APP\n");
 }
 // No readable PHP error log on all-inkl; cache/ is off-docroot and survives deploys.
-// NB: PHP stack traces include function args, so a fatal during a group join can
-// log a user's Bearer token. Keep this file off the web (it is) and don't paste
-// it into issues.
 ini_set('error_log', $appRoot . '/cache/php-error.log');
 ini_set('log_errors', '1');
 require $appRoot . '/src/bootstrap.php';

@@ -6,12 +6,10 @@ import { getAuthState, handleOAuthCallback, dropTokenIfScopesStale } from './api
 import { getLastTriggerTime, type AppState } from './timer';
 import { MAX_POSTS_PER_TRIGGER, getPendingAdd, setPendingAdd, clearPendingAdd, getPendingJoin, setPendingJoin, clearPendingJoin, clearPwaSubbed } from './state';
 import { fetchTodayPostCount, deletePost, removePostFromCache, resetMyPostsPagerIfStale } from './api/pixelfed';
-import type { Connection } from './api/social';
 import { renderCapture, stopCaptureStreams } from './screens/capture';
 import { renderFeed } from './screens/feed';
 import { renderGrid } from './screens/grid';
 import { renderCircle } from './screens/circle';
-import { renderPeerConnections } from './screens/peerConnections';
 import { renderConnectLanding } from './screens/connectLanding';
 import { renderGroupJoin } from './screens/groupJoin';
 import { renderGroupMembers } from './screens/groupMembers';
@@ -26,7 +24,7 @@ import { idbSet, IDB_KEYS } from './idb';
 import { resubscribeIfNeeded, syncSubscriptionTz, clearAppBadge, closeDailyNotification } from './notifications';
 
 const app = document.getElementById('app')!;
-type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'grid' | 'circle' | 'peer' | 'connect' | 'group_join' | 'group_members';
+type Screen = AppState | 'login' | 'capturing' | 'post_detail' | 'grid' | 'circle' | 'connect' | 'group_join' | 'group_members';
 const BASE_SCREENS = new Set<Screen>(['feed', 'login']);
 let activeScreen: Screen | null = null;
 let tickId: number | null = null;
@@ -207,14 +205,6 @@ function mountCapture(): void {
   app.appendChild(renderCapture(periodPostCount, onPosted, close, close));
 }
 
-// Converts a post author into the Connection shape the peer screen expects.
-function toPeer(a: FeedPost['account']): Connection {
-  return { id: a.id, displayName: a.displayName, username: a.username, acct: a.acct, avatarUrl: a.avatarUrl, url: a.url };
-}
-
-// Post detail with nested peer navigation (same pattern as mountGrid →
-// mountPostDetail): hardware back from the author's peer screen returns to the
-// detail view, not the screen below it.
 function mountPostDetail(post: FeedPost, onClose?: () => void): void {
   const auth = getAuthState();
   if (!auth) return;
@@ -238,19 +228,9 @@ function mountPostDetail(post: FeedPost, onClose?: () => void): void {
     history.back();
   };
 
-  const openPeer = (a: FeedPost['account']): void => {
-    if (popHandler) { window.removeEventListener('popstate', popHandler); popHandler = null; }
-    mountPeerConnections(toPeer(a), () => {
-      activeScreen = 'post_detail';
-      app.innerHTML = '';
-      installPop();
-      app.appendChild(renderDetail());
-    });
-  };
-
   const renderDetail = (): HTMLElement => renderPostDetail(post, auth, () => {
     history.back();
-  }, onDeletePost, openPeer);
+  }, onDeletePost);
 
   installPop();
 
@@ -305,8 +285,8 @@ function mountGrid(): void {
   app.appendChild(renderGrid(auth, openPost, onBack));
 }
 
-// The circle hub, with nested peer-connection navigation (same pattern as
-// mountGrid → mountPostDetail): hardware back from a peer list returns to the
+// The circle hub, with nested group-roster management (same pattern as
+// mountGrid → mountPostDetail): hardware back from a roster returns to the
 // circle, not the feed.
 function mountCircle(): void {
   const auth = getAuthState();
@@ -324,49 +304,22 @@ function mountCircle(): void {
     window.addEventListener('popstate', popHandler, { once: true });
   };
 
-  const openPeer = (peer: Connection): void => {
-    if (popHandler) { window.removeEventListener('popstate', popHandler); popHandler = null; }
-    mountPeerConnections(peer, () => {
-      activeScreen = 'circle';
-      app.innerHTML = '';
-      installPop();
-      app.appendChild(renderCircle(auth, onBack, openPeer, openGroup));
-    });
-  };
-
-  // Admin roster management, nested inside the circle exactly like a peer list:
-  // hardware back from it returns to the circle, not the feed.
+  // Admin roster management, nested inside the circle: hardware back from it
+  // returns to the circle, not the feed.
   const openGroup = (groupId: string): void => {
     if (popHandler) { window.removeEventListener('popstate', popHandler); popHandler = null; }
     mountGroupMembers(groupId, () => {
       activeScreen = 'circle';
       app.innerHTML = '';
       installPop();
-      app.appendChild(renderCircle(auth, onBack, openPeer, openGroup));
+      app.appendChild(renderCircle(auth, onBack, openGroup));
     });
   };
 
   const onBack = (): void => { history.back(); };
 
   installPop();
-  app.appendChild(renderCircle(auth, onBack, openPeer, openGroup));
-}
-
-function mountPeerConnections(peer: Connection, onClose?: () => void): void {
-  const auth = getAuthState();
-  if (!auth) return;
-  activeScreen = 'peer';
-  app.innerHTML = '';
-  removeInstallNudge();
-  removeNotificationNudge();
-
-  history.pushState({ screen: 'peer' }, '');
-
-  const returnTo = onClose ?? tick;
-  const onPopState = () => { activeScreen = null; returnTo(); };
-  window.addEventListener('popstate', onPopState, { once: true });
-
-  app.appendChild(renderPeerConnections(auth, peer, () => { history.back(); }));
+  app.appendChild(renderCircle(auth, onBack, openGroup));
 }
 
 function mountConnectLanding(handle: string): void {
@@ -401,9 +354,8 @@ function mountGroupJoin(token: string): void {
   app.appendChild(renderGroupJoin(auth, token, () => { history.back(); }));
 }
 
-// The roster-management overlay an admin opens to remove a member. Same overlay
-// pattern as the peer lists: pushState on open, pop on back, so hardware back
-// returns to the circle rather than the feed.
+// The roster-management overlay an admin opens to remove a member. pushState on
+// open, pop on back, so hardware back returns to the circle rather than the feed.
 function mountGroupMembers(groupId: string, onClose?: () => void): void {
   const auth = getAuthState();
   if (!auth) return;
@@ -429,7 +381,7 @@ function mount(screen: AppState | 'login'): void {
     removeInstallNudge();
     app.appendChild(renderLogin());
   } else {
-    app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid, mountCircle, a => mountPeerConnections(toPeer(a)), onPostCountRefresh));
+    app.appendChild(renderFeed(mountCapture, periodPostCount, mountPostDetail, mountGrid, mountCircle, onPostCountRefresh));
     // Show only one bottom banner — both are fixed bottom-0 and would overlap.
     const installShown = renderInstallNudge();
     if (!installShown) void renderNotificationNudge();
