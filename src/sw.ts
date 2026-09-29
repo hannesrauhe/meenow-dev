@@ -295,6 +295,34 @@ function shortHandle(acct: string): string {
   return acct.replace(/^@/, '').split('@')[0] || acct;
 }
 
+// Activate a waiting update on push — the moment right before the user opens
+// the app, and the only wake-up iOS reliably gives. Never rejects: a failed
+// update check must not fail the push. The running app is not reloaded;
+// skipWaiting + clientsClaim only change what the next open gets.
+async function activateNewSW(updateCheck: Promise<void>): Promise<void> {
+  const reg = self.registration;
+  await updateCheck;
+  if (reg.waiting) {
+    reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+    return;
+  }
+  // Still downloading: wait for 'installed' (where it becomes reg.waiting),
+  // capped so a slow network just leaves the update to the banner path.
+  const sw = reg.installing;
+  if (!sw) return;
+  await new Promise<void>(resolve => {
+    const timer = setTimeout(resolve, 15000);
+    sw.addEventListener('statechange', () => {
+      if (sw.state === 'installed') {
+        clearTimeout(timer);
+        resolve();
+      }
+    });
+  });
+  // Re-read: the waiting worker only exists after the await above.
+  self.registration.waiting?.postMessage({ type: 'SKIP_WAITING' });
+}
+
 self.addEventListener('push', event => {
   // json() throws on malformed payloads — swallow and treat as a plain tick so
   // even a corrupt push cannot end silently.
@@ -303,32 +331,32 @@ self.addEventListener('push', event => {
     data = event.data?.json() ?? {};
   } catch { /* malformed payload */ }
 
+  // Re-fetch sw.js now so the new bundle downloads while the notification shows.
+  const updateCheck = self.registration.update().then(() => {}).catch(() => {});
+
   // Group events MUST be branched on before anything else: an unrecognised
   // payload falls through to handleTick, which would render "b joined the group"
   // as a "time to post" reminder — wrong message, wrong reason, and the actual
   // work (approve/sever) would never run.
+  let work: Promise<void>;
   if (data.group_event) {
-    event.waitUntil(
-      handleGroupEvent(data.group_event)
-        .catch(err => console.error('[sw] group event failed', err))
-    );
-    return;
-  }
-
-  if (data.force) {
+    work = handleGroupEvent(data.group_event)
+      .catch(err => console.error('[sw] group event failed', err));
+  } else if (data.force) {
     const forceTriggerMs = getLastTriggerTime().getTime();
-    event.waitUntil(showDaily(forceTriggerMs, false).catch(err => console.error('[sw] push handler failed', err)));
-    return;
-  }
-
-  // Ticks with value always show; no-value ticks (pre-trigger, or post-posting
-  // with nothing to report — including errors) consume the counted silent budget
-  // and only surface the fallback once it is exhausted.
-  event.waitUntil(
-    handleTick(data.late === true)
+    work = showDaily(forceTriggerMs, false)
+      .catch(err => console.error('[sw] push handler failed', err));
+  } else {
+    // Ticks with value always show; no-value ticks (pre-trigger, or post-posting
+    // with nothing to report — including errors) consume the counted silent
+    // budget and only surface the fallback once it is exhausted.
+    work = handleTick(data.late === true)
       .catch(() => showFallbackOrSilent())
-      .catch(err => console.error('[sw] push handler failed', err))
-  );
+      .catch(err => console.error('[sw] push handler failed', err));
+  }
+  // Activation last: skipWaiting terminates this worker, so it must not fire
+  // while the notification or the group-event retry ladder is still running.
+  event.waitUntil(work.then(() => activateNewSW(updateCheck)));
 });
 
 self.addEventListener('notificationclick', event => {

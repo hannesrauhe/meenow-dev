@@ -81,6 +81,11 @@ function showUpdateBanner(updateSW: (reloadPage?: boolean) => Promise<void>): vo
   banner.querySelector('#btn-dismiss-update')?.addEventListener('click', () => banner.remove());
 }
 
+// Controller as it was when this page loaded. A push-activated update (sw.ts)
+// swaps it while the app keeps running the old code; applyUpdate compares
+// against this to tell "already activated" from a real stall.
+const initialController = 'serviceWorker' in navigator ? navigator.serviceWorker.controller : null;
+
 // Drive the reload ourselves rather than relying on vite-plugin-pwa's
 // isUpdate-gated reload, which does not fire reliably in an installed PWA. The
 // SKIP_WAITING handshake and its reload triggers (controllerchange, or the new
@@ -149,6 +154,11 @@ async function applyUpdate(
           if (sw.state === 'activated') reloadOnce('activated');
         });
         sw.postMessage({ type: 'SKIP_WAITING' });
+      } else if (navigator.serviceWorker.controller !== initialController) {
+        // A push already activated the update in the background — nothing left
+        // to skip, the reload alone finishes it.
+        reloadOnce('already activated');
+        return;
       } else {
         trace('no waiting/installing worker found');
       }
