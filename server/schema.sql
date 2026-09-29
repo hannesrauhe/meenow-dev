@@ -119,3 +119,27 @@ CREATE TABLE IF NOT EXISTS group_bans (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (group_id, account)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Error capture, the readable replacement for cache/php-error.log (which
+-- all-inkl will not show us). Raw rows, pruned by the cron.
+-- kind: 'upstream' = a status Pixelfed sent back through the proxy;
+--       'php'      = our own uncaught throw or fatal;
+--       'cron'     = the scheduled tick went silent.
+-- status 0 means the request never got an answer (curl transport error).
+-- route is normalised (ids folded to :id) so one broken endpoint is one group.
+-- ctx carries file:line, the build VERSION and a truncated sha256 of the
+-- Bearer token — enough to group one user's retries without storing a credential.
+CREATE TABLE IF NOT EXISTS errors (
+    id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    kind       VARCHAR(16) NOT NULL,
+    status     SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    method     VARCHAR(8)  NOT NULL DEFAULT '',
+    route      VARCHAR(191) NOT NULL DEFAULT '',
+    upstream   VARCHAR(191) NOT NULL DEFAULT '',
+    message    VARCHAR(512) NOT NULL DEFAULT '',
+    body       TEXT,
+    ctx        TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY created (created_at),
+    KEY route_status (route, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

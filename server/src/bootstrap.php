@@ -103,26 +103,14 @@ function meenow_json_response(int $status, array $body): void
     exit;
 }
 
-// Debug mode (config 'debug'): put the real error in the response so the app
-// can show it — no server log needed. Never on production: it leaks paths/SQL.
+// Kept as the name the CLI/tests already use. The handlers themselves live in
+// src/monitor.php and now run on every request, not only in debug mode: the
+// `debug` flag only decides whether the real error text is echoed to the client
+// (it leaks paths, so never on production) — recording happens either way.
 function meenow_debug_handlers(): void
 {
     error_reporting(E_ALL);
     ini_set('display_errors', '0'); // keep the JSON body clean
-    set_exception_handler(static function (Throwable $e): void {
-        meenow_json_response(500, [
-            'error' => 'server_error',
-            'debug' => get_class($e) . ': ' . $e->getMessage()
-                . ' in ' . basename($e->getFile()) . ':' . $e->getLine(),
-        ]);
-    });
-    register_shutdown_function(static function (): void {
-        $e = error_get_last();
-        $fatal = $e && in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true);
-        if (!$fatal || headers_sent()) return;
-        meenow_json_response(500, [
-            'error' => 'server_error',
-            'debug' => $e['message'] . ' in ' . basename($e['file']) . ':' . $e['line'],
-        ]);
-    });
+    require_once __DIR__ . '/monitor.php';
+    meenow_monitor_init();
 }

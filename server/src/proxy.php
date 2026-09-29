@@ -68,6 +68,24 @@ function proxy_flatten(string $prefix, mixed $value, array &$out): void
     $out[$prefix] = is_bool($value) ? ($value ? 'true' : 'false') : (string) $value;
 }
 
+// Pull the human-readable reason out of an upstream error body, so the errors
+// row says *why* and not just "422". Pixelfed/Mastodon use {"error": "..."} and
+// Laravel validation uses {"message": "..."}; anything else (an HTML 500 page)
+// falls back to the first line of text.
+function proxy_error_hint(string $body): string
+{
+    $json = json_decode($body, true);
+    if (is_array($json)) {
+        foreach (['error', 'message', 'error_description'] as $k) {
+            if (isset($json[$k]) && is_string($json[$k]) && $json[$k] !== '') {
+                return substr($json[$k], 0, 500);
+            }
+        }
+    }
+    $text = trim(strip_tags($body));
+    return substr($text, 0, 200);
+}
+
 // $rebuiltMultipart: curl picked the body type itself because it built the body,
 // so the inbound Content-Type — carrying a boundary that no longer exists — must
 // not be forwarded.

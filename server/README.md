@@ -25,12 +25,14 @@ One directory per instance; the domain points at its `public/` subdir, so
 ```
 <instance>/            one directory per deployment (e.g. meenow.de/, dev.meenow.de/)
   public/     ← domain docroot: PWA build (index.html…) + app.php router + .htaccess + .user.ini
-  src/        PHP app (bootstrap, proxy, push, groups, tick, trigger math, xkcd cache)
-  scripts/    gen-vapid.php, groups.php, smoke.php, parity-test.{php,mjs}, test-local.sh
+  src/        PHP app (bootstrap, proxy, push, groups, tick, trigger math, xkcd cache,
+              error capture, admin read endpoint)
+  scripts/    gen-vapid.php, groups.php, errors.php, smoke.php, parity-test.{php,mjs}, test-local.sh
   config/     config.php + vapid.json — SERVER-ONLY, never committed/overwritten
-  cache/      xkcd cache — server-owned
+  cache/      xkcd cache + php-error.log — server-owned
   vendor/     composer install --no-dev output — server-owned
-  schema.sql  MySQL tables (subscriptions, rate_hits, cron_slots, groups, group_members)
+  schema.sql  MySQL tables (subscriptions, rate_hits, cron_slots, groups, group_members,
+              group_invites, group_events, group_bans, errors)
   VERSION     installed build id (written by install.sh)
   install.sh  the installer (self-updating: each release ships the current one)
   .install.conf  REPO=owner/name (+ optional GITHUB_TOKEN) — server-owned
@@ -191,3 +193,51 @@ double-fires harmless; `?force=1` bypasses gating for manual tests. The 1800 s
 slot bucket is also what bounds the effective tick cadence: whatever interval the
 host's scheduled URL fires at, at most one run per 30-minute bucket reaches the
 push layer.
+
+## Monitoring
+
+Unexpected failures are written to the `errors` table (`src/monitor.php`), so a
+user's screenshot can be matched to a real cause instead of a guess. Captured:
+
+- **Upstream statuses through the proxy** — every 5xx, plus the 4xx in
+  `errors.log_statuses` (default 400/404/422). Those 4xx are the "Pixelfed
+  changed" signal: an endpoint or field we rely on stops existing.
+- **Our own uncaught throws and PHP fatals** — previously these landed only in
+  `cache/php-error.log`, which all-inkl will not show us.
+- **curl transport errors** (stored as status 0 — no answer at all).
+- **A silent cron** — if the newest tick slot is older than
+  `errors.cron_max_gap_s`, the next run records the gap. `/health` reports
+  `last_cron_s`/`cron_stalled` for an external pinger, which is what catches a
+  cron that stops and never comes back (the in-cron check needs two fires).
+
+Deliberately **not** captured: our own 401/403/405/429 and the router's 404.
+Those are expired tokens, abuse and scanner traffic (`/wp-admin`, `/.env`) —
+noise, not bugs, and they would bury the real rows.
+
+Every row is mirrored to `error_log()` first: a DB failure is exactly the case
+that cannot be written to the DB. Rows are raw, capped per (kind, route, status)
+by `errors.sample_cap_per_hour`, and pruned by the tick to `retention_days` /
+`max_rows`. The Bearer token is never stored — only a truncated hash, so one
+user's retries stay groupable. Bodies are truncated and scrubbed.
+
+Reading it (CLI, like groups):
+
+```
+php scripts/errors.php list [--limit=N] [--kind=upstream|php|cron]
+php scripts/errors.php show <id>
+php scripts/errors.php stats [--days=N]     # grouped — the view you want
+php scripts/errors.php liveness
+php scripts/errors.php prune [--keep-days=N] [--max-rows=N]
+```
+
+Or key-gated over HTTP (same `cron_key` gate as `/cron`):
+
+```
+GET /admin/errors?key=…                 recent rows
+GET /admin/errors?key=…&action=stats    grouped by kind/route/status
+GET /admin/errors?key=…&action=liveness
+GET /admin/errors?key=…&action=prune
+```
+
+`config.debug` still echoes the real error into the 500 body so the app can show
+it — but recording happens whether or not that flag is on.
