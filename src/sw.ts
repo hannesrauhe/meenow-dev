@@ -51,7 +51,7 @@ const DAILY_TAG = 'meenow-daily';
 const DAILY_COPY = [
   'Time for your daily meenow!',
   'Your meenow is still waiting',
-  'Last call \u2014 today\u2019s meenow',
+  'Last call: today\u2019s meenow',
 ];
 const MAX_DAILY_REMINDERS = DAILY_COPY.length;
 
@@ -134,7 +134,7 @@ function plural(n: number, one: string, many: string): string {
 // app badge: the user already posted, so nothing is pending.
 function showFallback(): Promise<void> {
   return self.registration.showNotification('meenow', {
-    body: "You're done for today — see what friends shared",
+    body: "You're done for today. See what friends shared",
     icon: ICON,
     badge: BADGE,
     tag: 'meenow-digest',
@@ -177,7 +177,7 @@ async function showPostPostedDigest(triggerMs: number, late: boolean): Promise<v
     const friends = await fetchFriendsPostedCount(auth);
     if (friends > 0) {
       await self.registration.showNotification('meenow', {
-        body: `${plural(friends, 'friend', 'friends')} posted today — open meenow`,
+        body: `${plural(friends, 'friend', 'friends')} posted today. Open meenow`,
         icon: ICON,
         badge: BADGE,
         tag: 'meenow-friends',

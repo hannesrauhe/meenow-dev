@@ -5,7 +5,7 @@
 // so the browser HTTP cache would pin the old bytes forever. A daily bucket
 // revalidates each avatar at most once a day.
 export function avatarSrc(url: string): string {
-  if (!url) return url;
+  if (!url || url.startsWith('data:')) return url;
   return `${url}${url.includes('?') ? '&' : '?'}v=${Math.floor(Date.now() / 86_400_000)}`;
 }
 

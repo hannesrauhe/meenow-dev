@@ -134,7 +134,7 @@ async function applyUpdate(
     trace('stalled');
     btn.disabled = false;
     btn.textContent = 'Reopen app';
-    const note = 'Update didn’t apply — fully close the app and reopen to finish.';
+    const note = 'Update didn’t apply. Fully close the app and reopen to finish.';
     status.textContent = isDev && status.textContent ? `${status.textContent} → ${note}` : note;
   }, 10000);
 
