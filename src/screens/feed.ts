@@ -1,4 +1,6 @@
 // Feed screen: main home feed showing today's meenow posts from followed accounts.
+declare const __GIT_HASH__: string;
+declare const __APP_VERSION__: string;
 import { SLEEPING_CAT, SPEECH_BUBBLE_ICON, GRID_ICON, PEOPLE_ICON } from '../icons';
 import { clearAuth, getAuthState, type AuthState } from '../api/auth';
 import { disableNotifications } from '../notifications';
@@ -80,7 +82,14 @@ export function renderFeed(onRequestCapture: () => void, postCount: number, onOp
     // token, so it has to run before clearAuth() erases it.
     void disableNotifications().finally(() => { clearAuth(); window.location.reload(); });
   });
-  footer.appendChild(logoutBtn);
+  const logoutRow = document.createElement('p');
+  logoutRow.className = 'flex items-center justify-center gap-2';
+  logoutRow.appendChild(logoutBtn);
+  const version = document.createElement('span');
+  version.className = 'text-ink/20 select-all';
+  version.textContent = `v${__APP_VERSION__} · ${__GIT_HASH__}`;
+  logoutRow.appendChild(version);
+  footer.appendChild(logoutRow);
 
   body.appendChild(footer);
   el.appendChild(body);

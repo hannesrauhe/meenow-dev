@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { execSync } from 'child_process';
+import pkg from './package.json';
 
 let GIT_HASH = 'unknown';
 try { GIT_HASH = execSync('git rev-parse --short HEAD').toString().trim(); } catch { /* no git */ }
@@ -13,6 +14,7 @@ const PHP_BACKEND = 'http://localhost:8080';
 export default defineConfig(() => ({
   define: {
     __GIT_HASH__: JSON.stringify(GIT_HASH),
+    __APP_VERSION__: JSON.stringify(pkg.version),
   },
   server: {
     proxy: {
