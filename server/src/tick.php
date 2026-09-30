@@ -35,6 +35,10 @@ return function (array $opts = []): array {
     $cfg = meenow_config();
     $now = time();
     $force = (bool) ($opts['force'] ?? false);
+    $message = isset($opts['message']) ? (string) $opts['message'] : null;
+    // Broadcast targeting: when set, only subscriptions owned by one of these
+    // "<instance>:<accountId>" keys are considered at all.
+    $accounts = isset($opts['accounts']) ? array_flip($opts['accounts']) : null;
 
     $vapidKeys = json_decode(file_get_contents($cfg['vapid']['key_file']), true);
     $auth = ['VAPID' => [
@@ -45,18 +49,28 @@ return function (array $opts = []): array {
     $webPush = new WebPush($auth, ['TTL' => 45 * 60, 'urgency' => 'high']);
 
     $rows = meenow_db()->query(
-        'SELECT id, endpoint, p256dh, auth, tz FROM subscriptions'
+        'SELECT id, endpoint, p256dh, auth, tz, account FROM subscriptions'
     )->fetchAll(PDO::FETCH_ASSOC);
 
-    $sent = 0; $skipped = 0; $expired = 0; $failed = 0;
+    $sent = 0; $skipped = 0; $expired = 0; $failed = 0; $matched = 0; $untargetable = 0;
 
     foreach ($rows as $row) {
-        $tz = $row['tz'] !== '' ? $row['tz'] : DEFAULT_TZ;
-        $decision = $force ? ['send' => true, 'late' => false] : tick_decision($now, $tz);
-        if (!$decision['send']) { $skipped++; continue; }
+        if ($accounts !== null) {
+            // Rows predating ownership can never match a target — counted so a
+            // typo'd group and a stale row are distinguishable in the summary.
+            if ($row['account'] === '') { $untargetable++; continue; }
+            if (!isset($accounts[$row['account']])) continue;
+        }
+        $matched++;
+        if ($message === null) {
+            $tz = $row['tz'] !== '' ? $row['tz'] : DEFAULT_TZ;
+            $decision = $force ? ['send' => true, 'late' => false] : tick_decision($now, $tz);
+            if (!$decision['send']) { $skipped++; continue; }
+        }
 
         $payloadArr = ['ts' => $now * 1000]; // ms, like the Node script
-        if ($decision['late']) $payloadArr['late'] = true;
+        if ($message !== null) $payloadArr['message'] = $message;
+        elseif ($decision['late']) $payloadArr['late'] = true;
         if ($force) $payloadArr['force'] = true;
         $payload = json_encode($payloadArr);
 
@@ -83,6 +97,8 @@ return function (array $opts = []): array {
         }
     }
 
-    return ['subscriptions' => count($rows), 'sent' => $sent, 'skipped' => $skipped,
+    $out = ['subscriptions' => count($rows), 'sent' => $sent, 'skipped' => $skipped,
             'expired' => $expired, 'failed' => $failed];
+    if ($accounts !== null) $out += ['matched' => $matched, 'untargetable' => $untargetable];
+    return $out;
 };

@@ -193,6 +193,13 @@ double-fires harmless; `?force=1` bypasses gating for manual tests. The 1800 s
 slot bucket is also what bounds the effective tick cadence: whatever interval the
 host's scheduled URL fires at, at most one run per 30-minute bucket reaches the
 push layer.
+`?message=…` (same key gate) is a manual broadcast: the text (≤280 chars) is
+pushed verbatim to every subscriber, skipping the slot dedupe and the timezone
+gate; the client shows it as-is, outside the silent budget. `&to_group=<slug>`
+(comma list ok) narrows the audience to those groups' members — matched via
+`group_members.account` = `subscriptions.account`; an unknown slug is a 400,
+and the JSON summary reports `matched`/`untargetable` so a typo never looks
+like a successful send.
 
 ## Monitoring
 

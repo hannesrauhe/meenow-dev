@@ -160,7 +160,7 @@ async function showPostPostedDigest(triggerMs: number, late: boolean): Promise<v
     if (eng.reblogs) parts.push(plural(eng.reblogs, 'reblog', 'reblogs'));
     if (eng.replies) parts.push(plural(eng.replies, 'reply', 'replies'));
     await self.registration.showNotification('meenow', {
-      body: `${parts.join(' · ')} on your meenow`,
+      body: `${parts.join(' · ')} on meenow posts`,
       icon: ICON,
       badge: BADGE,
       tag: 'meenow-digest',
@@ -326,7 +326,7 @@ async function activateNewSW(updateCheck: Promise<void>): Promise<void> {
 self.addEventListener('push', event => {
   // json() throws on malformed payloads — swallow and treat as a plain tick so
   // even a corrupt push cannot end silently.
-  let data: { ts?: number; force?: boolean; late?: boolean; group_event?: PushGroupEvent } = {};
+  let data: { ts?: number; force?: boolean; late?: boolean; message?: string; group_event?: PushGroupEvent } = {};
   try {
     data = event.data?.json() ?? {};
   } catch { /* malformed payload */ }
@@ -342,14 +342,23 @@ self.addEventListener('push', event => {
   if (data.group_event) {
     work = handleGroupEvent(data.group_event)
       .catch(err => console.error('[sw] group event failed', err));
-  } else if (data.force) {
-    const forceTriggerMs = getLastTriggerTime().getTime();
-    work = showDaily(forceTriggerMs, false)
-      .catch(err => console.error('[sw] push handler failed', err));
+  } else if (typeof data.message === 'string' && data.message) {
+    // Operator broadcast (cron ?message=): show the text verbatim, always
+    // visible — it is an explicit admin action, not a budgeted tick.
+    work = self.registration
+      .showNotification('meenow', {
+        body: data.message,
+        icon: ICON,
+        badge: BADGE,
+        tag: 'meenow-broadcast',
+      })
+      .then(resetSilentCount)
+      .catch(err => console.error('[sw] broadcast failed', err));
   } else {
-    // Ticks with value always show; no-value ticks (pre-trigger, or post-posting
-    // with nothing to report — including errors) consume the counted silent
-    // budget and only surface the fallback once it is exhausted.
+    // A force push (server-side test bypass) is a plain tick here: same gates,
+    // same digest. Ticks with value always show; no-value ticks (pre-trigger, or
+    // post-posting with nothing to report — including errors) consume the
+    // counted silent budget and only surface the fallback once it is exhausted.
     work = handleTick(data.late === true)
       .catch(() => showFallbackOrSilent())
       .catch(err => console.error('[sw] push handler failed', err));

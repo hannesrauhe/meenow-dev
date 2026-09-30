@@ -7,6 +7,9 @@ export const IDB_KEYS = {
   postedTriggerMs: 'posted-trigger-ms',
   auth: 'auth',
   lastSeenNotifId: 'last-seen-notif-id',
+  // statusId -> thread root is a #meenowApp post, learned while resolving
+  // replies. Lets a known root short-circuit the walk for every later reply.
+  meenowPostCache: 'meenow-post-cache',
   digestShownTriggerMs: 'digest-shown-trigger-ms',
   silentPushCount: 'silent-push-count',
   // Daily-reminder ladder: which trigger period it belongs to and how many
