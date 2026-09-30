@@ -270,6 +270,29 @@ check "verify: missing id rejected" "noId=false" "$VP"
 check "cron tick" '"subscriptions":1' "$(H GET 'http://127.0.0.1:8080/cron?action=tick&key=testkey123')"
 check "cron dedupe" 'slot already ran' "$(H GET 'http://127.0.0.1:8080/cron?action=tick&key=testkey123')"
 
+# --- targeted broadcast -----------------------------------------------------
+# Two subs: :1 is a member of group "test" (alice), :99 is not. The pre-existing
+# "def" sub has account="" so it is untargetable. Broadcasts skip slot dedupe.
+# Fresh budget: push/subscribe is rate-limited (max=5/min in the test config).
+php -r '$c=require "config/config.php"; $p=new PDO("mysql:host=".$c["db"]["host"].";dbname=".$c["db"]["name"], $c["db"]["user"], $c["db"]["pass"]); $p->exec("DELETE FROM rate_hits");'
+MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/push/subscribe \
+  '{"endpoint":"https://example.org/p/g1","keys":{"p256dh":"a","auth":"b"},"account":"pixelfed.social:1"}' >/dev/null
+MEENOW_AUTH='Bearer t' H POST http://127.0.0.1:8080/push/subscribe \
+  '{"endpoint":"https://example.org/p/g2","keys":{"p256dh":"a","auth":"b"},"account":"pixelfed.social:99"}' >/dev/null
+check "broadcast to_group matches member" '"matched":1' \
+  "$(H GET 'http://127.0.0.1:8080/cron?message=hi&key=testkey123&to_group=test')"
+check "broadcast unknown group" 'unknown_group' \
+  "$(H GET 'http://127.0.0.1:8080/cron?message=hi&key=testkey123&to_group=nosuchgroup')"
+php scripts/groups.php create emptygrp "Empty group" >/dev/null 2>&1
+check "broadcast known-but-empty group" '"matched":0' \
+  "$(H GET 'http://127.0.0.1:8080/cron?message=hi&key=testkey123&to_group=emptygrp')"
+check "broadcast bad message" 'bad_message' \
+  "$(H GET 'http://127.0.0.1:8080/cron?message=&key=testkey123')"
+# Untargeted broadcast reaches every sub (3 now), no matched/untargetable keys.
+check "broadcast all subs" '"subscriptions":3' \
+  "$(H GET 'http://127.0.0.1:8080/cron?message=hi&key=testkey123')"
+php -r '$c=require "config/config.php"; $p=new PDO("mysql:host=".$c["db"]["host"].";dbname=".$c["db"]["name"], $c["db"]["user"], $c["db"]["pass"]); $p->exec("DELETE FROM subscriptions WHERE endpoint IN (\"https://example.org/p/g1\",\"https://example.org/p/g2\")");'
+
 # Rate limit (max=5/min): earlier push/proxy calls consumed the budget; hammer.
 # Authenticated — push() checks the token before the limiter, so an anonymous
 # post 401s and never reaches it.
