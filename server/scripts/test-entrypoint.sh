@@ -281,6 +281,49 @@ for i in 1 2 3 4 5 6; do
 done
 check "rate limiter" "STATUS 429" "$RL"
 
+# --- error capture ---------------------------------------------------------
+# The recorder writes from a shutdown hook (meenow_json_response exits), so a
+# subprocess is the honest way to drive it: same code path, deterministic.
+ECOUNT() { php -r '$c=require "config/config.php"; $p=new PDO("mysql:host=".$c["db"]["host"].";dbname=".$c["db"]["name"], $c["db"]["user"], $c["db"]["pass"]); echo $p->query("SELECT COUNT(*) FROM errors")->fetchColumn();'; }
+php -r '$c=require "config/config.php"; $p=new PDO("mysql:host=".$c["db"]["host"].";dbname=".$c["db"]["name"], $c["db"]["user"], $c["db"]["pass"]); $p->exec("DELETE FROM errors");'
+php -r 'require "src/bootstrap.php"; require "src/monitor.php";
+$_SERVER["REQUEST_URI"]="/api/v1/timelines/home"; $_SERVER["REQUEST_METHOD"]="GET";
+meenow_monitor_init(); meenow_monitor_upstream(422, "pixelfed.social", "file is required");' >/dev/null 2>&1 || true
+check "capture: unexpected upstream status" 'upstream' "$(php scripts/errors.php list 2>&1)"
+check "capture: status recorded" '422' "$(php scripts/errors.php list 2>&1)"
+# 401/403/429 are expired tokens and abuse, not bugs — they must stay out.
+AFTER422=$(ECOUNT)
+php -r 'require "src/bootstrap.php"; require "src/proxy.php"; require "src/monitor.php";
+$_SERVER["REQUEST_URI"]="/api/v1/timelines/home"; meenow_monitor_init();
+meenow_monitor_upstream(401, "pixelfed.social", "unauthorized");' >/dev/null 2>&1 || true
+NOW=$(ECOUNT)
+[ "$NOW" = "$AFTER422" ] && ok "capture: 401 not recorded" || bad "capture: 401 not recorded" "count went $AFTER422 -> $NOW"
+# Our own uncaught throw is recorded, and the route folds ids to :id.
+php -r 'require "src/bootstrap.php"; require "src/monitor.php";
+$_SERVER["REQUEST_URI"]="/api/v1/media/123456789012345678"; meenow_monitor_init();
+throw new RuntimeException("kaboom");' >/dev/null 2>&1 || true
+check "capture: php throw recorded" 'kaboom' "$(php scripts/errors.php list 2>&1)"
+check "capture: route ids folded" '/api/v1/media/:id' "$(php scripts/errors.php list 2>&1)"
+# The live proxy path must record too (this is the join-500 class of bug).
+CLR
+MEENOW_AUTH='Bearer testtoken' H GET http://127.0.0.1:8080/api/v1/definitely-not-a-route > /dev/null 2>&1 || true
+check "capture: proxied 404 recorded" 'definitely-not-a-route' "$(php scripts/errors.php list 2>&1)"
+# Key-gated read endpoint: same gate as /cron, and it fails closed.
+check "admin errors list" '"total"' "$(H GET 'http://127.0.0.1:8080/admin/errors?key=testkey123')"
+check "admin errors shows row" 'kaboom' "$(H GET 'http://127.0.0.1:8080/admin/errors?key=testkey123')"
+check "admin errors bad key" 'bad_key' "$(H GET 'http://127.0.0.1:8080/admin/errors?key=nope')"
+check "admin errors no key" 'bad_key' "$(H GET 'http://127.0.0.1:8080/admin/errors')"
+check "admin errors stats" '"groups"' "$(H GET 'http://127.0.0.1:8080/admin/errors?key=testkey123&action=stats')"
+check "admin errors liveness" '"stalled"' "$(H GET 'http://127.0.0.1:8080/admin/errors?key=testkey123&action=liveness')"
+# Retention: an old row survives until the prune says so.
+php -r '$c=require "config/config.php"; $p=new PDO("mysql:host=".$c["db"]["host"].";dbname=".$c["db"]["name"], $c["db"]["user"], $c["db"]["pass"]);
+$p->exec("INSERT INTO errors (kind, route, message, created_at) VALUES (\"php\", \"/old\", \"ancient\", NOW() - INTERVAL 30 DAY)");'
+check "prune keeps fresh rows" 'kaboom' "$(php scripts/errors.php list 2>&1)"
+check "prune drops old row" 'pruned 1' "$(php scripts/errors.php prune 2>&1)"
+check "prune left the fresh ones" 'kaboom' "$(php scripts/errors.php list 2>&1)"
+check "errors CLI stats groups" 'php' "$(php scripts/errors.php stats 2>&1)"
+check "errors CLI unknown cmd" 'unknown command' "$(php scripts/errors.php bogus 2>&1)"
+
 kill $WEB 2>/dev/null || true
 rm -f config/config.php config/vapid.json
 

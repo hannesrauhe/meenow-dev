@@ -32,10 +32,22 @@ check('config readable', function () {
 
 check('db connect + schema', function () {
     $pdo = meenow_db();
-    foreach (['subscriptions', 'rate_hits', 'cron_slots', 'groups', 'group_members'] as $t) {
+    foreach (['subscriptions', 'rate_hits', 'cron_slots', 'groups', 'group_members', 'errors'] as $t) {
         $pdo->query("SELECT 1 FROM `{$t}` LIMIT 1"); // backticks: `groups` is reserved
     }
     return 'tables present';
+});
+
+// The error capture is useless if its table is missing or read-only, and a
+// silent insert failure is exactly what this feature must not have.
+check('errors table writable', function () {
+    $pdo = meenow_db();
+    $pdo->prepare(
+        "INSERT INTO errors (kind, status, route, message) VALUES ('php', 0, '/smoke', 'probe')"
+    )->execute();
+    $id = (int) $pdo->lastInsertId();
+    $pdo->prepare('DELETE FROM errors WHERE id = ?')->execute([$id]);
+    return "row #{$id} written and removed";
 });
 
 check('vapid sign (ES256)', function () {

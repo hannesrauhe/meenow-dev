@@ -18,6 +18,24 @@ $action = $_GET['action'] ?? 'tick';
 $force = (($_GET['force'] ?? '') === '1');
 $now = time();
 $pdo = meenow_db();
+$monitor = meenow_monitor_cfg($cfg);
+
+// Liveness, BEFORE the slot insert: this run is the proof the cron still fires,
+// so the gap has to be measured against the previous slot. A row here is the
+// only trace of a host that stopped pinging us and later resumed.
+if ($action === 'tick' && !$force) {
+    $gap = meenow_monitor_cron_gap($pdo, $monitor);
+    if ($gap['stalled']) {
+        meenow_monitor_queue([
+            'kind' => 'cron',
+            'route' => '/cron',
+            'message' => $gap['last_tick'] === null
+                ? 'the scheduled tick has never run'
+                : "the scheduled tick was silent for {$gap['gap_s']}s "
+                  . "(limit {$monitor['cron_max_gap_s']}s)",
+        ]);
+    }
+}
 
 // Slot dedupe: one run per 30-minute slot per action. The window logic tolerates
 // cron jitter; the slot key prevents duplicate pushes from double-fires.
@@ -33,6 +51,8 @@ if (!$force) {
 // Housekeeping: both tables are counters/dedupe keys, old rows are useless.
 $pdo->prepare('DELETE FROM rate_hits WHERE minute < ?')->execute([intdiv($now, 60) - 1440]);
 $pdo->prepare('DELETE FROM cron_slots WHERE slot < ?')->execute([intdiv($now, 1800) - 48]);
+// The error capture is raw rows by design, so retention lives here too.
+meenow_monitor_prune($pdo, $monitor);
 
 $log = match ($action) {
     'tick' => (require __DIR__ . '/tick.php')(['force' => $force]),

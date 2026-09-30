@@ -26,7 +26,11 @@ ini_set('error_log', $appRoot . '/cache/php-error.log');
 ini_set('log_errors', '1');
 require $appRoot . '/src/bootstrap.php';
 require $appRoot . '/src/proxy.php';
-if (meenow_config()['debug'] ?? false) meenow_debug_handlers();
+require $appRoot . '/src/monitor.php';
+// Always on, not just in debug mode: recording unexpected errors is the point.
+// `debug` only adds the real message to the response body.
+meenow_monitor_init();
+if (meenow_config()['debug'] ?? false) ini_set('display_errors', '0');
 
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 
@@ -41,13 +45,22 @@ match (true) {
     str_starts_with($path, '/api/') || $path === '/oauth/token' => proxy($path),
     str_starts_with($path, '/push/') => push($path),
     str_starts_with($path, '/groups/') => (require $appRoot . '/src/groups.php')($path),
+    str_starts_with($path, '/admin/') => require $appRoot . '/src/admin.php',
     default => meenow_json_response(404, ['error' => 'not_found']),
 };
 
 function health(): void
 {
     meenow_db(); // also proves DB connectivity
-    meenow_json_response(200, ['ok' => true, 'php' => PHP_VERSION]);
+    // last_cron_s lets an external uptime pinger alert on a dead CronJob — the
+    // in-cron gap check cannot fire when nothing fires.
+    $gap = meenow_monitor_cron_gap(meenow_db(), meenow_monitor_cfg());
+    meenow_json_response(200, [
+        'ok' => true,
+        'php' => PHP_VERSION,
+        'last_cron_s' => $gap['gap_s'],
+        'cron_stalled' => $gap['stalled'],
+    ]);
 }
 
 // Second-instance proxy: /i/<host>/... . The host must match the allowlist
@@ -113,6 +126,13 @@ function proxy(string $path, ?string $host = null): void
     if ($response === false) {
         $err = curl_error($ch);
         error_log("[proxy] curl error for {$target}: {$err}");
+        // Status 0 = no answer at all. The user sees a bare 502, so this row is
+        // the only place the reason survives.
+        meenow_monitor_queue([
+            'kind' => 'upstream',
+            'upstream' => $host ?? meenow_config()['home_instance'],
+            'message' => 'curl: ' . $err,
+        ]);
         meenow_json_response(502, ['error' => 'upstream_unreachable']);
     }
     $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
@@ -120,6 +140,13 @@ function proxy(string $path, ?string $host = null): void
 
     $headers = substr($response, 0, $headerSize);
     $body = substr($response, $headerSize);
+
+    // Recorded before the echo: $status is a local that dies with this function.
+    // The body is only parsed for a status we actually keep.
+    if (meenow_monitor_watching($status)) {
+        meenow_monitor_upstream($status, $host ?? meenow_config()['home_instance'],
+            proxy_error_hint($body));
+    }
 
     http_response_code($status);
     foreach (explode("\r\n", $headers) as $line) {

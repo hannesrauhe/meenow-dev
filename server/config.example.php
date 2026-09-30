@@ -67,6 +67,26 @@ return [
 
     // Echo real errors (class, message, file:line) in API responses so the app
     // shows them on screen — no server log needed. NEVER on production: it
-    // leaks paths and query internals.
+    // leaks paths and query internals. Recording into the errors table happens
+    // either way; this flag only controls the response body.
     // 'debug' => true,
+
+    // --- Error capture (src/monitor.php, scripts/errors.php) -----------------
+    // Unexpected failures are written to the `errors` table AND mirrored to
+    // cache/php-error.log. Captured: upstream 5xx, the 4xx listed below, curl
+    // transport errors, our own uncaught throws/fatals, and a silent cron.
+    // Deliberately NOT captured: our own 401/403/405/429 and the router's 404 —
+    // scanner traffic (wp-admin, .env) and expired tokens are noise, not bugs.
+    // 'errors' => [
+    //     // Upstream 4xx worth a row: the "Pixelfed changed" signal.
+    //     'log_statuses' => [400, 404, 422],
+    //     // Rows per (kind, route, status) per hour. Bounds a retry storm.
+    //     'sample_cap_per_hour' => 20,
+    //     // Applied by the cron tick and by `errors.php prune`.
+    //     'retention_days' => 7,
+    //     'max_rows' => 5000,
+    //     // A tick slot older than this means the host stopped firing the
+    //     // CronJob. Two 30-minute buckets leaves one missed fire tolerated.
+    //     'cron_max_gap_s' => 7200,
+    // ],
 ];
